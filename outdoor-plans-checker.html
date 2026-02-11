@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Should I Cancel My Plans? - Philly Weather Check</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 28px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            color: #718096;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .input-section {
+            margin-bottom: 30px;
+        }
+        
+        label {
+            display: block;
+            color: #4a5568;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 16px;
+            color: #2d3748;
+            background: white;
+            transition: border-color 0.3s;
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .check-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 25px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+        
+        .check-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .check-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .result {
+            display: none;
+            margin-top: 30px;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+        }
+        
+        .result.show {
+            display: block;
+        }
+        
+        .result.go {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+        
+        .result.caution {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .result.cancel {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+        }
+        
+        .result-emoji {
+            font-size: 60px;
+            margin-bottom: 15px;
+        }
+        
+        .result-title {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        
+        .result-message {
+            font-size: 18px;
+            margin-bottom: 20px;
+            opacity: 0.95;
+        }
+        
+        .weather-details {
+            background: rgba(255,255,255,0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .weather-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #4a5568;
+            padding: 20px;
+        }
+        
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #718096;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤔 Should I Cancel My Plans?</h1>
+        <p class="subtitle">Get weather-based advice for your outdoor activity in Philadelphia</p>
+        
+        <div class="input-section">
+            <label for="activity">What are you planning to do?</label>
+            <select id="activity">
+                <option value="">Select an activity...</option>
+                <option value="sports">Outdoor Sports (soccer, baseball, etc.)</option>
+                <option value="running">Running/Jogging</option>
+                <option value="picnic">Picnic/BBQ</option>
+                <option value="wedding">Outdoor Wedding/Event</option>
+                <option value="hiking">Hiking/Walking</option>
+                <option value="beach">Beach Trip</option>
+                <option value="cycling">Cycling</option>
+                <option value="concert">Outdoor Concert/Festival</option>
+                <option value="photography">Photography</option>
+                <option value="general">General Outdoor Activity</option>
+            </select>
+        </div>
+        
+        <div class="input-section">
+            <label for="when">When?</label>
+            <select id="when">
+                <option value="today">Today</option>
+                <option value="tomorrow">Tomorrow</option>
+                <option value="2">Day After Tomorrow</option>
+            </select>
+        </div>
+        
+        <button class="check-btn" onclick="checkWeather()">Check Weather</button>
+        
+        <div id="result" class="result"></div>
+        
+        <div class="footer">
+            Data from National Weather Service • Philadelphia Weather Authority
+        </div>
+    </div>
+
+    <script>
+        async function checkWeather() {
+            const activity = document.getElementById('activity').value;
+            const when = document.getElementById('when').value;
+            const resultDiv = document.getElementById('result');
+            const btn = document.querySelector('.check-btn');
+            
+            if (!activity) {
+                alert('Please select an activity!');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Checking weather...';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<div class="loading">Loading forecast...</div>';
+            resultDiv.classList.add('show');
+            
+            try {
+                // Philadelphia coordinates
+                const lat = 39.9526;
+                const lon = -75.1652;
+                
+                // Get forecast
+                const pointResponse = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
+                const pointData = await pointResponse.json();
+                
+                const forecastResponse = await fetch(pointData.properties.forecast);
+                const forecastData = await forecastResponse.json();
+                
+                // Get the right period based on "when"
+                let periodIndex;
+                if (when === 'today') {
+                    periodIndex = 0;
+                } else if (when === 'tomorrow') {
+                    periodIndex = 2;
+                } else {
+                    periodIndex = 4;
+                }
+                
+                const period = forecastData.properties.periods[periodIndex];
+                const forecast = period.detailedForecast.toLowerCase();
+                const temp = period.temperature;
+                const precipitation = period.probabilityOfPrecipitation?.value || 0;
+                const windSpeed = parseInt(period.windSpeed.split(' ')[0]) || 0;
+                
+                // Decision logic based on activity
+                const decision = makeDecision(activity, forecast, temp, precipitation, windSpeed);
+                
+                resultDiv.className = `result ${decision.status} show`;
+                resultDiv.innerHTML = `
+                    <div class="result-emoji">${decision.emoji}</div>
+                    <div class="result-title">${decision.title}</div>
+                    <div class="result-message">${decision.message}</div>
+                    
+                    <div class="weather-details">
+                        <div class="weather-row">
+                            <span><strong>Temperature:</strong></span>
+                            <span>${temp}°F</span>
+                        </div>
+                        <div class="weather-row">
+                            <span><strong>Precipitation Chance:</strong></span>
+                            <span>${precipitation}%</span>
+                        </div>
+                        <div class="weather-row">
+                            <span><strong>Wind Speed:</strong></span>
+                            <span>${period.windSpeed}</span>
+                        </div>
+                        <div class="weather-row">
+                            <span><strong>Conditions:</strong></span>
+                            <span>${period.shortForecast}</span>
+                        </div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        ⚠️ Unable to load forecast. Please try again.
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Check Weather';
+            }
+        }
+        
+        function makeDecision(activity, forecast, temp, precipitation, windSpeed) {
+            const hasRain = forecast.includes('rain') || forecast.includes('shower');
+            const hasStorm = forecast.includes('storm') || forecast.includes('thunder');
+            const hasSnow = forecast.includes('snow');
+            const isCold = temp < 35;
+            const isHot = temp > 90;
+            const isWindy = windSpeed > 20;
+            
+            // Wedding - most sensitive
+            if (activity === 'wedding') {
+                if (hasStorm || precipitation > 60 || (hasRain && precipitation > 40)) {
+                    return {
+                        status: 'cancel',
+                        emoji: '❌',
+                        title: 'STRONGLY CONSIDER ALTERNATIVES',
+                        message: 'High risk of rain/storms. Have a solid backup plan or move indoors!'
+                    };
+                } else if (precipitation > 30 || isWindy) {
+                    return {
+                        status: 'caution',
+                        emoji: '⚠️',
+                        title: 'PROCEED WITH CAUTION',
+                        message: 'Conditions could be challenging. Definitely have a tent/backup ready.'
+                    };
+                } else {
+                    return {
+                        status: 'go',
+                        emoji: '✅',
+                        title: 'YOU\'RE GOOD TO GO!',
+                        message: 'Weather looks favorable for your special day!'
+                    };
+                }
+            }
+            
+            // Beach
+            if (activity === 'beach') {
+                if (hasStorm || (hasRain && precipitation > 50)) {
+                    return {
+                        status: 'cancel',
+                        emoji: '❌',
+                        title: 'CANCEL OR RESCHEDULE',
+                        message: 'Rain/storms expected. Not ideal beach weather.'
+                    };
+                } else if (temp < 70 || precipitation > 30) {
+                    return {
+                        status: 'caution',
+                        emoji: '⚠️',
+                        title: 'NOT IDEAL',
+                        message: 'You could go, but it won\'t be great beach weather.'
+                    };
+                } else {
+                    return {
+                        status: 'go',
+                        emoji: '🏖️',
+                        title: 'PERFECT BEACH DAY!',
+                        message: 'Get out there and enjoy!'
+                    };
+                }
+            }
+            
+            // Sports
+            if (activity === 'sports') {
+                if (hasStorm || hasSnow) {
+                    return {
+                        status: 'cancel',
+                        emoji: '❌',
+                        title: 'CANCEL',
+                        message: 'Unsafe conditions for outdoor sports.'
+                    };
+                } else if (precipitation > 70 || (hasRain && precipitation > 50)) {
+                    return {
+                        status: 'cancel',
+                        emoji: '🌧️',
+                        title: 'PROBABLY CANCEL',
+                        message: 'Heavy rain expected. Field will be unplayable.'
+                    };
+                } else if (precipitation > 40 || temp > 95 || temp < 30) {
+                    return {
+                        status: 'caution',
+                        emoji: '⚠️',
+                        title: 'CHALLENGING CONDITIONS',
+                        message: 'Playable but not ideal. Stay hydrated/warm.'
+                    };
+                } else {
+                    return {
+                        status: 'go',
+                        emoji: '⚽',
+                        title: 'GAME ON!',
+                        message: 'Good conditions for outdoor sports!'
+                    };
+                }
+            }
+            
+            // Running/Cycling
+            if (activity === 'running' || activity === 'cycling') {
+                if (hasStorm) {
+                    return {
+                        status: 'cancel',
+                        emoji: '❌',
+                        title: 'STAY INSIDE',
+                        message: 'Storms = dangerous. Hit the gym instead.'
+                    };
+                } else if (precipitation > 60 || temp > 95 || temp < 20) {
+                    return {
+                        status: 'caution',
+                        emoji: '⚠️',
+                        title: 'NOT RECOMMENDED',
+                        message: 'Extreme conditions. Consider indoor alternatives.'
+                    };
+                } else if (precipitation > 30 || temp > 85 || temp < 32) {
+                    return {
+                        status: 'caution',
+                        emoji: '⚠️',
+                        title: 'DOABLE BUT NOT IDEAL',
+                        message: 'You can do it, but be prepared for the conditions.'
+                    };
+                } else {
+                    return {
+                        status: 'go',
+                        emoji: '🏃',
+                        title: 'PERFECT FOR A RUN!',
+                        message: 'Great conditions. Get out there!'
+                    };
+                }
+            }
+            
+            // General outdoor activity
+            if (hasStorm || (hasRain && precipitation > 70)) {
+                return {
+                    status: 'cancel',
+                    emoji: '❌',
+                    title: 'RESCHEDULE',
+                    message: 'Heavy rain/storms expected. Better to stay dry.'
+                };
+            } else if (precipitation > 50 || temp > 95 || temp < 25) {
+                return {
+                    status: 'caution',
+                    emoji: '⚠️',
+                    title: 'CHALLENGING',
+                    message: 'Not impossible, but conditions will be uncomfortable.'
+                };
+            } else if (precipitation > 30) {
+                return {
+                    status: 'caution',
+                    emoji: '🌂',
+                    title: 'BRING AN UMBRELLA',
+                    message: 'Some rain possible. Come prepared!'
+                };
+            } else {
+                return {
+                    status: 'go',
+                    emoji: '✅',
+                    title: 'YOU\'RE ALL SET!',
+                    message: 'Weather looks good for outdoor activities!'
+                };
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Will it Snow Tomorrow in Philly?</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 28px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            color: #718096;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #4a5568;
+            padding: 20px;
+            font-size: 18px;
+        }
+        
+        .result {
+            text-align: center;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .result.snow-yes {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .result.snow-maybe {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .result.snow-no {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        
+        .result-emoji {
+            font-size: 60px;
+            margin-bottom: 15px;
+        }
+        
+        .result-text {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .result-detail {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+        
+        .details {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        
+        .detail-label {
+            color: #4a5568;
+            font-weight: 500;
+        }
+        
+        .detail-value {
+            color: #2d3748;
+            font-weight: 600;
+        }
+        
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #718096;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>❄️ Will it Snow Tomorrow?</h1>
+        <p class="subtitle">Philadelphia Weather Forecast</p>
+        
+        <div id="content">
+            <div class="loading">Loading forecast data...</div>
+        </div>
+        
+        <button class="refresh-btn" onclick="loadForecast()" style="display:none;" id="refreshBtn">🔄 Refresh Forecast</button>
+        
+        <div class="footer">
+            Data from National Weather Service • Philadelphia Weather Authority
+        </div>
+    </div>
+
+    <script>
+        async function loadForecast() {
+            const content = document.getElementById('content');
+            const refreshBtn = document.getElementById('refreshBtn');
+            
+            content.innerHTML = '<div class="loading">Loading forecast data...</div>';
+            refreshBtn.style.display = 'none';
+            
+            try {
+                // Philadelphia coordinates
+                const lat = 39.9526;
+                const lon = -75.1652;
+                
+                // Get forecast from National Weather Service
+                const pointResponse = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
+                const pointData = await pointResponse.json();
+                
+                const forecastResponse = await fetch(pointData.properties.forecast);
+                const forecastData = await forecastResponse.json();
+                
+                // Get tomorrow's forecast (periods[2] is usually tomorrow day, periods[3] is tomorrow night)
+                const tomorrowDay = forecastData.properties.periods[2];
+                const tomorrowNight = forecastData.properties.periods[3];
+                
+                // Check for snow in forecast
+                const dayForecast = tomorrowDay.detailedForecast.toLowerCase();
+                const nightForecast = tomorrowNight.detailedForecast.toLowerCase();
+                const combinedForecast = dayForecast + ' ' + nightForecast;
+                
+                const hasSnow = combinedForecast.includes('snow');
+                const hasFlurries = combinedForecast.includes('flurries');
+                const hasWintryMix = combinedForecast.includes('wintry mix') || combinedForecast.includes('sleet');
+                const chanceOfPrecip = tomorrowDay.probabilityOfPrecipitation?.value || 0;
+                
+                let resultClass, emoji, resultText, resultDetail;
+                
+                if (hasSnow && !hasFlurries) {
+                    resultClass = 'snow-yes';
+                    emoji = '❄️';
+                    resultText = 'YES!';
+                    resultDetail = 'Snow is expected tomorrow';
+                } else if (hasFlurries || hasWintryMix) {
+                    resultClass = 'snow-maybe';
+                    emoji = '🌨️';
+                    resultText = 'MAYBE';
+                    resultDetail = hasFlurries ? 'Flurries possible' : 'Wintry mix possible';
+                } else if (chanceOfPrecip > 50 && tomorrowDay.temperature <= 35) {
+                    resultClass = 'snow-maybe';
+                    emoji = '❓';
+                    resultText = 'POSSIBLY';
+                    resultDetail = 'Cold + precipitation = snow possible';
+                } else {
+                    resultClass = 'snow-no';
+                    emoji = '☀️';
+                    resultText = 'NO';
+                    resultDetail = 'No snow in the forecast';
+                }
+                
+                content.innerHTML = `
+                    <div class="result ${resultClass}">
+                        <div class="result-emoji">${emoji}</div>
+                        <div class="result-text">${resultText}</div>
+                        <div class="result-detail">${resultDetail}</div>
+                    </div>
+                    
+                    <div class="details">
+                        <div class="detail-row">
+                            <span class="detail-label">Tomorrow</span>
+                            <span class="detail-value">${tomorrowDay.name}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Temperature</span>
+                            <span class="detail-value">${tomorrowDay.temperature}°${tomorrowDay.temperatureUnit}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Conditions</span>
+                            <span class="detail-value">${tomorrowDay.shortForecast}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Chance of Precip</span>
+                            <span class="detail-value">${chanceOfPrecip}%</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Full Forecast</span>
+                            <span class="detail-value" style="text-align: right; max-width: 60%;">${tomorrowDay.detailedForecast}</span>
+                        </div>
+                    </div>
+                `;
+                
+                refreshBtn.style.display = 'block';
+                
+            } catch (error) {
+                content.innerHTML = `
+                    <div class="error">
+                        ⚠️ Unable to load forecast data. Please try again in a moment.
+                    </div>
+                `;
+                refreshBtn.style.display = 'block';
+            }
+        }
+        
+        // Load forecast on page load
+        loadForecast();
+    </script>
+</body>
+</html>
