@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Philadelphia Weather - Current Conditions & Alerts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .weather-container {
+            background: white;
+            border-radius: 25px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            margin: 0 auto;
+            box-shadow: 0 25px 70px rgba(0,0,0,0.3);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .location {
+            color: #2d3748;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .date-time {
+            color: #718096;
+            font-size: 14px;
+        }
+        
+        /* Alert Banner - Shows Only When Active */
+        .alert-banner {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            display: none;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .alert-banner.active {
+            display: block;
+        }
+        
+        .alert-banner:hover {
+            transform: translateY(-2px);
+        }
+        
+        .alert-banner.watch {
+            background: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%);
+        }
+        
+        .alert-banner.advisory {
+            background: linear-gradient(135deg, #f5d547 0%, #f0c419 100%);
+            color: #1a202c;
+        }
+        
+        .alert-count {
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        
+        .alert-event {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .alert-expires {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        /* Current Weather Section */
+        .current-weather {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            padding: 30px;
+            color: white;
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        
+        .current-label {
+            font-size: 14px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+        }
+        
+        .weather-icon {
+            font-size: 80px;
+            margin: 10px 0;
+        }
+        
+        .temperature {
+            font-size: 64px;
+            font-weight: bold;
+            line-height: 1;
+        }
+        
+        .description {
+            font-size: 20px;
+            margin: 15px 0 10px 0;
+            text-transform: capitalize;
+        }
+        
+        .feels-like {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        /* Quick Actions */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+        
+        .action-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102,126,234,0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102,126,234,0.5);
+        }
+        
+        .action-btn.radar {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        
+        .action-btn.alerts {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        }
+        
+        .action-icon {
+            font-size: 24px;
+        }
+        
+        /* Details Grid */
+        .details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .detail-card {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .detail-label {
+            color: #718096;
+            font-size: 12px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .detail-value {
+            color: #2d3748;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .detail-icon {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+        
+        /* Today's Forecast */
+        .forecast-section {
+            background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+        
+        .forecast-title {
+            color: #1a202c;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .forecast-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            color: #1a202c;
+        }
+        
+        .forecast-label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .forecast-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        /* Tomorrow Preview */
+        .tomorrow-section {
+            background: #f7fafc;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .tomorrow-title {
+            color: #2d3748;
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .tomorrow-content {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+        
+        .tomorrow-temp {
+            text-align: center;
+        }
+        
+        .tomorrow-high {
+            color: #e53e3e;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        
+        .tomorrow-low {
+            color: #3182ce;
+            font-size: 20px;
+            margin-top: 5px;
+        }
+        
+        .tomorrow-icon {
+            font-size: 48px;
+        }
+        
+        .tomorrow-desc {
+            font-size: 16px;
+            color: #4a5568;
+            text-align: center;
+            flex: 1;
+        }
+        
+        /* All Alerts Section (Expandable) */
+        .all-alerts {
+            background: #fff5f5;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ff6b6b;
+            display: none;
+        }
+        
+        .all-alerts.has-alerts {
+            display: block;
+        }
+        
+        .alerts-title {
+            color: #c53030;
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        
+        .alert-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border-left: 3px solid #ff6b6b;
+        }
+        
+        .alert-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .alert-item-title {
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+        
+        .alert-item-time {
+            font-size: 12px;
+            color: #718096;
+        }
+        
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #4a5568;
+        }
+        
+        .loading-spinner {
+            font-size: 48px;
+            animation: spin 2s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Error State */
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+        }
+        
+        .error-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: #718096;
+            font-size: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+        
+        .last-update {
+            margin-top: 5px;
+            font-style: italic;
+        }
+        
+        /* Refresh Button */
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: block;
+            margin: 20px auto 0;
+            transition: transform 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 480px) {
+            .weather-container {
+                padding: 25px;
+            }
+            
+            .temperature {
+                font-size: 52px;
+            }
+            
+            .weather-icon {
+                font-size: 60px;
+            }
+            
+            .details-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+            
+            .tomorrow-content {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="weather-container" id="weatherContainer">
+        <div class="loading">
+            <div class="loading-spinner">🌤️</div>
+            <p style="margin-top: 15px; font-size: 16px;">Loading weather data...</p>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ REPLACE WITH YOUR OPENWEATHER API KEY ⚠️
+        const API_KEY = 'ea6f5674c5d50651863a0b1ce96be3cb';
+        
+        // Philadelphia coordinates
+        const LAT = 39.9526;
+        const LON = -75.1652;
+        
+        async function loadWeather() {
+            const container = document.getElementById('weatherContainer');
+            
+            try {
+                // Fetch current weather
+                const currentResponse = await fetch(
+                    `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=imperial`
+                );
+                
+                if (!currentResponse.ok) {
+                    throw new Error('Failed to fetch current weather');
+                }
+                
+                const currentData = await currentResponse.json();
+                
+                // Fetch forecast
+                const forecastResponse = await fetch(
+                    `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=imperial`
+                );
+                
+                if (!forecastResponse.ok) {
+                    throw new Error('Failed to fetch forecast');
+                }
+                
+                const forecastData = await forecastResponse.json();
+                
+                // Fetch alerts using One Call API 3.0
+                let alertsData = null;
+                try {
+                    const alertsResponse = await fetch(
+                        `https://api.openweathermap.org/data/3.0/onecall?lat=${LAT}&lon=${LON}&appid=${API_KEY}&exclude=minutely,hourly,daily`
+                    );
+                    if (alertsResponse.ok) {
+                        alertsData = await alertsResponse.json();
+                    }
+                } catch (alertError) {
+                    console.log('Alerts not available:', alertError);
+                }
+                
+                // Display everything
+                displayWeather(currentData, forecastData, alertsData);
+                
+            } catch (error) {
+                console.error('Error loading weather:', error);
+                container.innerHTML = `
+                    <div class="error">
+                        <div class="error-icon">⚠️</div>
+                        <h3 style="margin-bottom: 10px;">Unable to Load Weather</h3>
+                        <p>Please check your API key or try again later.</p>
+                        <button class="refresh-btn" onclick="loadWeather()">🔄 Try Again</button>
+                    </div>
+                `;
+            }
+        }
+        
+        function displayWeather(current, forecast, alerts) {
+            const container = document.getElementById('weatherContainer');
+            
+            // Get current time
+            const now = new Date();
+            const dateOptions = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+            const timeOptions = { hour: 'numeric', minute: '2-digit' };
+            
+            // Get weather icon
+            const weatherIcon = getWeatherIcon(current.weather[0].id, current.weather[0].icon);
+            
+            // Calculate today's high/low
+            const today = new Date().getDate();
+            const todayForecasts = forecast.list.filter(item => {
+                const forecastDate = new Date(item.dt * 1000).getDate();
+                return forecastDate === today;
+            });
+            
+            let todayHigh = Math.round(current.main.temp);
+            let todayLow = Math.round(current.main.temp);
+            
+            if (todayForecasts.length > 0) {
+                const temps = todayForecasts.map(item => item.main.temp);
+                todayHigh = Math.round(Math.max(...temps));
+                todayLow = Math.round(Math.min(...temps));
+            }
+            
+            // Get tomorrow's forecast
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowDate = tomorrow.getDate();
+            
+            const tomorrowForecasts = forecast.list.filter(item => {
+                const forecastDate = new Date(item.dt * 1000).getDate();
+                return forecastDate === tomorrowDate;
+            });
+            
+            let tomorrowHigh = '--';
+            let tomorrowLow = '--';
+            let tomorrowDesc = 'No data';
+            let tomorrowIcon = '🌤️';
+            
+            if (tomorrowForecasts.length > 0) {
+                const tomorrowTemps = tomorrowForecasts.map(item => item.main.temp);
+                tomorrowHigh = Math.round(Math.max(...tomorrowTemps));
+                tomorrowLow = Math.round(Math.min(...tomorrowTemps));
+                tomorrowDesc = tomorrowForecasts[0].weather[0].description;
+                tomorrowIcon = getWeatherIcon(
+                    tomorrowForecasts[0].weather[0].id,
+                    tomorrowForecasts[0].weather[0].icon
+                );
+            }
+            
+            // Calculate rain chance
+            const rainChance = todayForecasts.length > 0 
+                ? Math.round(Math.max(...todayForecasts.map(f => (f.pop || 0) * 100)))
+                : 0;
+            
+            // Build alerts HTML
+            let alertBannerHTML = '';
+            let allAlertsHTML = '';
+            let hasAlerts = false;
+            
+            if (alerts && alerts.alerts && alerts.alerts.length > 0) {
+                hasAlerts = true;
+                const firstAlert = alerts.alerts[0];
+                
+                let alertClass = 'warning';
+                const event = firstAlert.event.toLowerCase();
+                if (event.includes('watch')) alertClass = 'watch';
+                else if (event.includes('advisory')) alertClass = 'advisory';
+                
+                const expires = new Date(firstAlert.end * 1000).toLocaleString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                });
+                
+                alertBannerHTML = `
+                    <div class="alert-banner active ${alertClass}" onclick="window.open('https://www.weather.gov/', '_blank')">
+                        <div class="alert-count">${alerts.alerts.length} Active Alert${alerts.alerts.length > 1 ? 's' : ''}</div>
+                        <div class="alert-event">${getAlertIcon(firstAlert.event)} ${firstAlert.event}</div>
+                        <div class="alert-expires">Expires: ${expires} • Click for details</div>
+                    </div>
+                `;
+                
+                // Build all alerts list
+                allAlertsHTML = alerts.alerts.map(alert => {
+                    const start = new Date(alert.start * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+                    const end = new Date(alert.end * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+                    
+                    return `
+                        <div class="alert-item">
+                            <div class="alert-item-title">${getAlertIcon(alert.event)} ${alert.event}</div>
+                            <div class="alert-item-time">Issued: ${start} • Expires: ${end}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            // Build complete HTML
+            container.innerHTML = `
+                <div class="header">
+                    <div class="location">📍 Philadelphia</div>
+                    <div class="date-time">${now.toLocaleDateString('en-US', dateOptions)}</div>
+                </div>
+                
+                ${alertBannerHTML}
+                
+                <div class="current-weather">
+                    <div class="current-label">Current Conditions</div>
+                    <div class="weather-icon">${weatherIcon}</div>
+                    <div class="temperature">${Math.round(current.main.temp)}°F</div>
+                    <div class="description">${current.weather[0].description}</div>
+                    <div class="feels-like">Feels like ${Math.round(current.main.feels_like)}°F</div>
+                </div>
+                
+                <div class="quick-actions">
+                    <a href="https://radar.weather.gov/region/northeast/standard" target="_blank" class="action-btn radar">
+                        <span class="action-icon">🗺️</span>
+                        <span>Live Radar</span>
+                    </a>
+                    <a href="https://www.weather.gov/" target="_blank" class="action-btn alerts">
+                        <span class="action-icon">🚨</span>
+                        <span>${hasAlerts ? 'View Alerts' : 'Check Alerts'}</span>
+                    </a>
+                </div>
+                
+                ${hasAlerts ? `
+                    <div class="all-alerts has-alerts">
+                        <div class="alerts-title">⚠️ Active Weather Alerts</div>
+                        ${allAlertsHTML}
+                    </div>
+                ` : ''}
+                
+                <div class="details-grid">
+                    <div class="detail-card">
+                        <div class="detail-icon">💧</div>
+                        <div class="detail-label">Humidity</div>
+                        <div class="detail-value">${current.main.humidity}%</div>
+                    </div>
+                    <div class="detail-card">
+                        <div class="detail-icon">💨</div>
+                        <div class="detail-label">Wind</div>
+                        <div class="detail-value">${Math.round(current.wind.speed)} mph</div>
+                    </div>
+                    <div class="detail-card">
+                        <div class="detail-icon">🌡️</div>
+                        <div class="detail-label">Pressure</div>
+                        <div class="detail-value">${Math.round(current.main.pressure * 0.02953)} in</div>
+                    </div>
+                    <div class="detail-card">
+                        <div class="detail-icon">👁️</div>
+                        <div class="detail-label">Visibility</div>
+                        <div class="detail-value">${Math.round(current.visibility / 1609)} mi</div>
+                    </div>
+                </div>
+                
+                <div class="forecast-section">
+                    <div class="forecast-title">📅 Today's Forecast</div>
+                    <div class="forecast-row">
+                        <span class="forecast-label">High Temperature</span>
+                        <span class="forecast-value">${todayHigh}°F</span>
+                    </div>
+                    <div class="forecast-row">
+                        <span class="forecast-label">Low Temperature</span>
+                        <span class="forecast-value">${todayLow}°F</span>
+                    </div>
+                    <div class="forecast-row">
+                        <span class="forecast-label">Chance of Rain</span>
+                        <span class="forecast-value">${rainChance}%</span>
+                    </div>
+                </div>
+                
+                <div class="tomorrow-section">
+                    <div class="tomorrow-title">Tomorrow Preview</div>
+                    <div class="tomorrow-content">
+                        <div class="tomorrow-temp">
+                            <div class="tomorrow-high">${tomorrowHigh}°</div>
+                            <div class="tomorrow-low">${tomorrowLow}°</div>
+                        </div>
+                        <div class="tomorrow-icon">${tomorrowIcon}</div>
+                        <div class="tomorrow-desc">${capitalize(tomorrowDesc)}</div>
+                    </div>
+                </div>
+                
+                <button class="refresh-btn" onclick="loadWeather()">🔄 Refresh Weather</button>
+                
+                <div class="footer">
+                    Data from OpenWeather API & National Weather Service<br>
+                    <div class="last-update">Last updated: ${now.toLocaleTimeString('en-US', timeOptions)}</div>
+                </div>
+            `;
+        }
+        
+        function getWeatherIcon(weatherId, iconCode) {
+            if (weatherId >= 200 && weatherId < 300) return '⛈️';
+            if (weatherId >= 300 && weatherId < 400) return '🌦️';
+            if (weatherId >= 500 && weatherId < 600) {
+                if (weatherId === 511) return '🌨️';
+                return '🌧️';
+            }
+            if (weatherId >= 600 && weatherId < 700) return '❄️';
+            if (weatherId >= 701 && weatherId < 800) return '🌫️';
+            if (weatherId === 800) {
+                return iconCode.includes('d') ? '☀️' : '🌙';
+            }
+            if (weatherId > 800 && weatherId < 900) {
+                if (weatherId === 801) return '🌤️';
+                if (weatherId === 802) return '⛅';
+                return '☁️';
+            }
+            return '🌤️';
+        }
+        
+        function getAlertIcon(eventName) {
+            const event = eventName.toLowerCase();
+            if (event.includes('tornado')) return '🌪️';
+            if (event.includes('winter') || event.includes('snow') || event.includes('ice') || event.includes('blizzard')) return '❄️';
+            if (event.includes('heat')) return '🌡️';
+            if (event.includes('flood')) return '🌊';
+            if (event.includes('wind')) return '💨';
+            if (event.includes('storm') || event.includes('thunder')) return '⛈️';
+            if (event.includes('fire')) return '🔥';
+            if (event.includes('fog')) return '🌫️';
+            if (event.includes('hurricane') || event.includes('tropical')) return '🌀';
+            if (event.includes('freeze') || event.includes('frost')) return '🧊';
+            return '⚠️';
+        }
+        
+        function capitalize(str) {
+            return str.split(' ').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+        
+        // Load weather on page load
+        loadWeather();
+        
+        // Auto-refresh every hour
+        setInterval(loadWeather, 3600000);
+        
+        console.log('Philadelphia Weather Widget v2.0 loaded!');
+        console.log('Features: Current weather, Alerts, Radar link, Forecast');
+    </script>
+</body>
+</html>
