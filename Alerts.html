@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Alert Banner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: transparent;
+        }
+        
+        .alert-banner {
+            display: none;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            animation: slideDown 0.5s ease-out;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .alert-banner:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        .alert-banner.active {
+            display: block;
+        }
+        
+        .alert-banner.watch {
+            background: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%);
+        }
+        
+        .alert-banner.advisory {
+            background: linear-gradient(135deg, #f5d547 0%, #f0c419 100%);
+            color: #1a202c;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .alert-icon {
+            font-size: 24px;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.1);
+            }
+        }
+        
+        .alert-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .alert-details {
+            font-size: 14px;
+            opacity: 0.95;
+        }
+        
+        .no-alert {
+            display: none;
+        }
+        
+        @media (max-width: 600px) {
+            .alert-title {
+                font-size: 16px;
+            }
+            .alert-details {
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="alertBanner" class="alert-banner">
+        <div class="alert-content">
+            <span class="alert-icon">⚠️</span>
+            <div class="alert-title" id="alertTitle">Loading alerts...</div>
+            <div class="alert-details" id="alertDetails">Click for details</div>
+        </div>
+    </div>
+
+    <script>
+        // Your OpenWeather API key
+        const API_KEY = 'YOUR_API_KEY_HERE';
+        
+        // Philadelphia coordinates
+        const LAT = 39.9526;
+        const LON = -75.1652;
+        
+        async function checkForAlerts() {
+            try {
+                // Try OpenWeather One Call API for alerts
+                const response = await fetch(
+                    `https://api.openweathermap.org/data/3.0/onecall?lat=${LAT}&lon=${LON}&appid=${API_KEY}&exclude=minutely,hourly,daily`
+                );
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.alerts && data.alerts.length > 0) {
+                        displayAlert(data.alerts[0], data.alerts.length);
+                    } else {
+                        hideAlert();
+                    }
+                } else {
+                    // Fallback: Try National Weather Service
+                    await checkNWSAlerts();
+                }
+            } catch (error) {
+                console.log('Alert check failed, trying NWS fallback');
+                await checkNWSAlerts();
+            }
+        }
+        
+        async function checkNWSAlerts() {
+            try {
+                const response = await fetch(
+                    `https://api.weather.gov/alerts/active?point=${LAT},${LON}`
+                );
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.features && data.features.length > 0) {
+                        const alert = data.features[0].properties;
+                        displayNWSAlert(alert, data.features.length);
+                    } else {
+                        hideAlert();
+                    }
+                } else {
+                    hideAlert();
+                }
+            } catch (error) {
+                console.log('NWS alert check failed');
+                hideAlert();
+            }
+        }
+        
+        function displayAlert(alert, count) {
+            const banner = document.getElementById('alertBanner');
+            const title = document.getElementById('alertTitle');
+            const details = document.getElementById('alertDetails');
+            
+            // Determine alert severity
+            const event = alert.event.toLowerCase();
+            banner.className = 'alert-banner active';
+            
+            if (event.includes('watch')) {
+                banner.classList.add('watch');
+            } else if (event.includes('advisory')) {
+                banner.classList.add('advisory');
+            }
+            
+            // Set content
+            if (count > 1) {
+                title.textContent = `⚠️ ${count} ACTIVE WEATHER ALERTS`;
+            } else {
+                title.textContent = `⚠️ ${alert.event.toUpperCase()}`;
+            }
+            
+            const expires = new Date(alert.end * 1000);
+            const expiresStr = expires.toLocaleString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+            
+            details.textContent = `Expires: ${expiresStr} • Click for full details`;
+            
+            // Make banner clickable
+            banner.onclick = () => {
+                window.open('https://www.weather.gov/', '_blank');
+            };
+            
+            banner.style.display = 'block';
+        }
+        
+        function displayNWSAlert(alert, count) {
+            const banner = document.getElementById('alertBanner');
+            const title = document.getElementById('alertTitle');
+            const details = document.getElementById('alertDetails');
+            
+            banner.className = 'alert-banner active';
+            
+            const event = alert.event.toLowerCase();
+            if (event.includes('watch')) {
+                banner.classList.add('watch');
+            } else if (event.includes('advisory')) {
+                banner.classList.add('advisory');
+            }
+            
+            if (count > 1) {
+                title.textContent = `⚠️ ${count} ACTIVE WEATHER ALERTS`;
+            } else {
+                title.textContent = `⚠️ ${alert.event}`;
+            }
+            
+            details.textContent = `${alert.headline} • Click for details`;
+            
+            banner.onclick = () => {
+                window.open('https://www.weather.gov/', '_blank');
+            };
+            
+            banner.style.display = 'block';
+        }
+        
+        function hideAlert() {
+            const banner = document.getElementById('alertBanner');
+            banner.style.display = 'none';
+        }
+        
+        // Check for alerts on load
+        checkForAlerts();
+        
+        // Check every 10 minutes
+        setInterval(checkForAlerts, 600000);
+    </script>
+</body>
+</html>
+```
+
+---
+
+## STEP 2: Upload to GitHub
+
+1. Save file as `alert-banner.html`
+2. Add your API key (line 73)
+3. Upload to your GitHub repository
+4. Will be available at:
+```
+   https://YOUR-USERNAME.github.io/philly-weather-tools/alert-banner.html
