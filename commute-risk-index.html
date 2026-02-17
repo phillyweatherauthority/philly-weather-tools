@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Commute Risk Index · Philly Weather Authority</title>
+  <meta name="description" content="Live commute risk score for the Philadelphia region. Check road conditions, precipitation, wind, and alerts before you drive."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --bg-2:      #161b22;
+      --bg-3:      #1c2128;
+      --bg-4:      #21262d;
+      --line:      #30363d;
+      --line-2:    #484f58;
+      --text:      #e6edf3;
+      --text-mid:  #8b949e;
+      --text-soft: #6e7681;
+      --sky:       #58a6ff;
+      --sky-dim:   #1f3a5f;
+      --green:     #3fb950;
+      --green-dim: #0d3320;
+      --amber:     #d29922;
+      --amber-dim: #3d2d00;
+      --orange:    #f0883e;
+      --orange-dim:#3d1f00;
+      --red:       #f85149;
+      --red-dim:   #3d1111;
+      --font-head: 'Bebas Neue', 'Arial Black', sans-serif;
+      --font-body: 'DM Sans', system-ui, sans-serif;
+      --font-mono: 'DM Mono', 'Courier New', monospace;
+      --radius:    10px;
+      --max:       900px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    a { color: var(--sky); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── SITE HEADER ── */
+    .site-header {
+      border-bottom: 1px solid var(--line);
+      padding: 0 24px;
+    }
+    .site-header-inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px;
+    }
+    .back-link {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 600;
+      color: var(--text-mid);
+      transition: color .15s;
+    }
+    .back-link:hover { color: var(--text); text-decoration: none; }
+    .back-link svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+    .header-brand {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--text-soft); letter-spacing: .5px;
+    }
+    .header-brand span { color: var(--sky); }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 32px 24px 0;
+      max-width: var(--max); margin: 0 auto;
+    }
+    .tool-eyebrow {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--sky); text-transform: uppercase;
+      letter-spacing: 1.5px; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .live-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(63,185,80,.15); color: var(--green);
+      border: 1px solid rgba(63,185,80,.3);
+      padding: 2px 8px; border-radius: 20px;
+      font-size: 10px; font-weight: 500;
+    }
+    .live-badge::before {
+      content: '';
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .hero h1 {
+      font-family: var(--font-head);
+      font-size: clamp(44px, 8vw, 80px);
+      line-height: .95; letter-spacing: 1px;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    .hero h1 em { color: var(--sky); font-style: normal; }
+    .hero-sub {
+      font-size: 15px; color: var(--text-mid);
+      max-width: 560px; margin-bottom: 24px;
+    }
+
+    /* ── ROUTE INPUT BAR ── */
+    .route-bar {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .route-bar-label {
+      font-family: var(--font-mono); font-size: 10px;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-soft); margin-bottom: 12px;
+    }
+    .route-inputs {
+      display: grid;
+      grid-template-columns: 1fr 32px 1fr auto;
+      gap: 8px; align-items: end;
+    }
+    @media (max-width: 620px) {
+      .route-inputs { grid-template-columns: 1fr; }
+      .arrow-divider { display: none; }
+    }
+    .input-group { display: flex; flex-direction: column; gap: 5px; }
+    .input-group label {
+      font-size: 10px; font-weight: 600;
+      font-family: var(--font-mono);
+      text-transform: uppercase; letter-spacing: .8px;
+      color: var(--text-soft);
+    }
+    .route-input {
+      width: 100%; padding: 10px 13px;
+      background: var(--bg-3); border: 1px solid var(--line);
+      color: var(--text); border-radius: 8px;
+      font-family: var(--font-body); font-size: 14px; font-weight: 500;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .route-input::placeholder { color: var(--text-soft); font-weight: 400; }
+    .route-input:focus { outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px rgba(88,166,255,.12); }
+    .arrow-divider {
+      text-align: center; color: var(--text-soft);
+      font-size: 18px; padding-bottom: 10px;
+    }
+    .check-btn {
+      padding: 10px 20px; border-radius: 8px;
+      background: var(--sky); color: var(--bg);
+      border: none; font-family: var(--font-body);
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: opacity .15s;
+      white-space: nowrap; height: 42px;
+      align-self: flex-end;
+    }
+    .check-btn:hover { opacity: .85; }
+    .check-btn:disabled { background: var(--bg-4); color: var(--text-soft); cursor: not-allowed; }
+    .route-status {
+      margin-top: 10px;
+      font-size: 12px; font-family: var(--font-mono);
+      color: var(--text-soft); min-height: 14px;
+    }
+    .route-status.err { color: var(--red); }
+
+    /* ── MAIN LAYOUT ── */
+    .main { max-width: var(--max); margin: 0 auto; padding: 0 24px 60px; }
+
+    /* ── ALERT STRIP ── */
+    .alert-strip {
+      display: none;
+      background: var(--red-dim); border: 1px solid rgba(248,81,73,.35);
+      border-radius: var(--radius); padding: 12px 16px; margin-bottom: 20px;
+    }
+    .alert-strip.active { display: flex; gap: 10px; align-items: flex-start; }
+    .alert-strip-tag {
+      background: var(--red); color: white;
+      font-size: 9px; font-family: var(--font-mono);
+      font-weight: 500; text-transform: uppercase;
+      letter-spacing: .5px; padding: 3px 7px;
+      border-radius: 4px; flex-shrink: 0; margin-top: 1px;
+    }
+    .alert-strip-text { font-size: 13px; color: #fca5a5; line-height: 1.4; }
+    .alert-strip-text strong { color: var(--red); display: block; margin-bottom: 2px; }
+
+    /* ── COMPARE PANELS ── */
+    .compare-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; margin-bottom: 20px;
+    }
+    @media (max-width: 500px) { .compare-row { grid-template-columns: 1fr; } }
+    .compare-panel {
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 14px;
+      position: relative; overflow: hidden;
+    }
+    .compare-panel::before {
+      content: ''; position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+    }
+    .compare-panel.c-low::before    { background: var(--green); }
+    .compare-panel.c-mod::before    { background: var(--amber); }
+    .compare-panel.c-high::before   { background: var(--orange); }
+    .compare-panel.c-severe::before { background: var(--red); }
+    .compare-location {
+      font-size: 11px; font-family: var(--font-mono);
+      color: var(--text-soft); margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .worst-pill {
+      background: var(--red); color: white;
+      font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 3px;
+      text-transform: uppercase; letter-spacing: .3px;
+    }
+    .compare-score-num {
+      font-family: var(--font-head);
+      font-size: 52px; line-height: 1;
+      margin-bottom: 2px;
+    }
+    .c-low    .compare-score-num { color: var(--green); }
+    .c-mod    .compare-score-num { color: var(--amber); }
+    .c-high   .compare-score-num { color: var(--orange); }
+    .c-severe .compare-score-num { color: var(--red); }
+    .compare-level {
+      font-size: 13px; font-weight: 700; margin-bottom: 6px;
+    }
+    .c-low    .compare-level { color: var(--green); }
+    .c-mod    .compare-level { color: var(--amber); }
+    .c-high   .compare-level { color: var(--orange); }
+    .c-severe .compare-level { color: var(--red); }
+    .compare-detail { font-size: 12px; color: var(--text-mid); line-height: 1.5; }
+
+    /* ── SCORE HERO ── */
+    .score-hero {
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 24px;
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 24px; align-items: center;
+      position: relative; overflow: hidden;
+    }
+    .score-hero::after {
+      content: ''; position: absolute;
+      top: 0; left: 0; bottom: 0; width: 4px;
+    }
+    .score-hero.c-low::after    { background: var(--green); }
+    .score-hero.c-mod::after    { background: var(--amber); }
+    .score-hero.c-high::after   { background: var(--orange); }
+    .score-hero.c-severe::after { background: var(--red); }
+
+    .score-number-wrap { text-align: center; }
+    .score-big {
+      font-family: var(--font-head);
+      font-size: clamp(80px, 12vw, 120px);
+      line-height: .85;
+      letter-spacing: -1px;
+      transition: color .4s;
+    }
+    .c-low    .score-big { color: var(--green); }
+    .c-mod    .score-big { color: var(--amber); }
+    .c-high   .score-big { color: var(--orange); }
+    .c-severe .score-big { color: var(--red); }
+    .score-denom {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--text-soft); letter-spacing: .5px;
+    }
+    .score-right {}
+    .score-label {
+      font-family: var(--font-head);
+      font-size: clamp(28px, 4vw, 40px);
+      letter-spacing: .5px; line-height: 1.05;
+      margin-bottom: 8px; transition: color .4s;
+    }
+    .c-low    .score-label { color: var(--green); }
+    .c-mod    .score-label { color: var(--amber); }
+    .c-high   .score-label { color: var(--orange); }
+    .c-severe .score-label { color: var(--red); }
+    .score-summary {
+      font-size: 15px; color: var(--text-mid);
+      margin-bottom: 12px; line-height: 1.4;
+    }
+    .score-source {
+      font-family: var(--font-mono); font-size: 10px;
+      color: var(--text-soft); letter-spacing: .3px;
+    }
+    .score-source span { color: var(--sky); }
+
+    /* ── STAT GRID ── */
+    .stat-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 10px; margin-bottom: 16px;
+    }
+    @media (max-width: 540px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-tile {
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 14px;
+    }
+    .stat-tile .s-label {
+      font-family: var(--font-mono); font-size: 10px;
+      text-transform: uppercase; letter-spacing: .8px;
+      color: var(--text-soft); margin-bottom: 8px;
+    }
+    .stat-tile .s-val {
+      font-family: var(--font-head); font-size: 28px;
+      line-height: 1; color: var(--text);
+      margin-bottom: 4px;
+    }
+    .stat-tile .s-note { font-size: 11px; color: var(--text-soft); }
+    .s-note.warn { color: var(--amber); }
+    .s-note.bad  { color: var(--red); }
+    .s-note.good { color: var(--green); }
+
+    /* ── BOTTOM PANELS ── */
+    .bottom-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; margin-bottom: 16px;
+    }
+    @media (max-width: 580px) { .bottom-grid { grid-template-columns: 1fr; } }
+    .bottom-panel {
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 16px;
+    }
+    .panel-title {
+      font-family: var(--font-mono); font-size: 10px;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-soft); margin-bottom: 14px;
+    }
+
+    /* School delay */
+    .school-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .school-pct {
+      font-family: var(--font-head); font-size: 48px;
+      line-height: 1; color: var(--text); min-width: 76px;
+    }
+    .bar-wrap { flex: 1; }
+    .bar-track { height: 6px; background: var(--bg-4); border-radius: 3px; overflow: hidden; margin-bottom: 5px; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
+    .bar-label { font-size: 11px; color: var(--text-mid); }
+
+    /* Decision list */
+    .decision-list { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .decision-list li { display: flex; gap: 9px; font-size: 13px; line-height: 1.4; }
+    .d-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .d-strong { display: block; font-weight: 600; color: var(--text); font-size: 13px; }
+    .d-note { color: var(--text-soft); font-size: 11px; }
+
+    /* ── FOOTER LINKS ── */
+    .tool-links {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 32px;
+    }
+    .tool-link {
+      font-size: 11px; font-family: var(--font-mono);
+      color: var(--sky); border: 1px solid var(--sky-dim);
+      background: rgba(88,166,255,.05);
+      padding: 6px 12px; border-radius: 6px;
+      transition: background .15s;
+    }
+    .tool-link:hover { background: rgba(88,166,255,.12); text-decoration: none; }
+
+    /* ── PAGE FOOTER ── */
+    .page-footer {
+      border-top: 1px solid var(--line);
+      padding: 20px 24px;
+      max-width: var(--max); margin: 0 auto;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+      font-family: var(--font-mono); font-size: 11px; color: var(--text-soft);
+    }
+
+    /* ── LOADING STATE ── */
+    .loading-shimmer {
+      background: linear-gradient(90deg, var(--bg-3) 25%, var(--bg-4) 50%, var(--bg-3) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px; display: inline-block;
+    }
+    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+    /* ── FADE IN ── */
+    @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .fade-in   { animation: fadeUp .4s ease forwards; }
+    .fade-in-2 { animation: fadeUp .4s .1s ease both; }
+    .fade-in-3 { animation: fadeUp .4s .2s ease both; }
+    .fade-in-4 { animation: fadeUp .4s .3s ease both; }
+  </style>
+</head>
+<body>
+
+<!-- ── SITE HEADER ── -->
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="back-link" href="https://phillyweatherauthority.com">
+      <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      Philly Weather Authority
+    </a>
+    <div class="header-brand">COMMUTE RISK · <span>NWS LIVE</span></div>
+  </div>
+</header>
+
+<!-- ── HERO + INPUT ── -->
+<div class="hero">
+  <div class="tool-eyebrow">
+    Philly Weather Authority
+    <span class="live-badge">Live NWS Data</span>
+  </div>
+  <h1>COMMUTE<br><em>RISK</em> INDEX</h1>
+  <p class="hero-sub">Real-time road risk score for the Philadelphia region, powered by live NWS forecasts and active weather alerts.</p>
+
+  <!-- ROUTE BAR -->
+  <div class="route-bar">
+    <div class="route-bar-label">Check your specific route — or leave blank for Philadelphia defaults</div>
+    <div class="route-inputs">
+      <div class="input-group">
+        <label for="originInput">From</label>
+        <input class="route-input" id="originInput" type="text" placeholder="e.g. Cherry Hill, NJ" autocomplete="off"/>
+      </div>
+      <div class="arrow-divider">→</div>
+      <div class="input-group">
+        <label for="destInput">To</label>
+        <input class="route-input" id="destInput" type="text" placeholder="e.g. Center City, Philadelphia" autocomplete="off"/>
+      </div>
+      <button class="check-btn" id="checkBtn" onclick="runRoute()">Check Route</button>
+    </div>
+    <div class="route-status" id="routeStatus">Loaded defaults: Philadelphia region</div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ACTIVE ALERT STRIP -->
+  <div class="alert-strip" id="alertStrip">
+    <span class="alert-strip-tag">⚠ Alert</span>
+    <div class="alert-strip-text">
+      <strong id="alertTitle">—</strong>
+      <span id="alertDesc">—</span>
+    </div>
+  </div>
+
+  <!-- COMPARE PANELS (shown when origin/dest differ meaningfully) -->
+  <div class="compare-row" id="compareRow" style="display:none">
+    <div class="compare-panel" id="compareOriginPanel">
+      <div class="compare-location" id="compareOriginLoc">📍 —</div>
+      <div class="compare-score-num" id="compareOriginScore">—</div>
+      <div class="compare-level" id="compareOriginLevel">—</div>
+      <div class="compare-detail" id="compareOriginDetail">—</div>
+    </div>
+    <div class="compare-panel" id="compareDestPanel">
+      <div class="compare-location" id="compareDestLoc">🏁 —</div>
+      <div class="compare-score-num" id="compareDestScore">—</div>
+      <div class="compare-level" id="compareDestLevel">—</div>
+      <div class="compare-detail" id="compareDestDetail">—</div>
+    </div>
+  </div>
+
+  <!-- MAIN SCORE -->
+  <div class="score-hero c-low fade-in" id="scoreHero">
+    <div class="score-number-wrap">
+      <div class="score-big" id="scoreBig">—</div>
+      <div class="score-denom">/ 100</div>
+    </div>
+    <div class="score-right">
+      <div class="score-label" id="scoreLabel">Loading…</div>
+      <div class="score-summary" id="scoreSummary">Fetching NWS hourly forecast data…</div>
+      <div class="score-source">Source: <span>api.weather.gov</span> · Updated <span id="scoreUpdated">—</span></div>
+    </div>
+  </div>
+
+  <!-- STAT GRID -->
+  <div class="stat-grid fade-in-2">
+    <div class="stat-tile">
+      <div class="s-label">Road Temp</div>
+      <div class="s-val" id="sRoadTemp">—</div>
+      <div class="s-note" id="sRoadNote">Air temp proxy</div>
+    </div>
+    <div class="stat-tile">
+      <div class="s-label">Precip Type</div>
+      <div class="s-val" id="sPrecip">—</div>
+      <div class="s-note" id="sPrecipNote">—</div>
+    </div>
+    <div class="stat-tile">
+      <div class="s-label">Wind Gusts</div>
+      <div class="s-val" id="sWind">—</div>
+      <div class="s-note" id="sWindNote">—</div>
+    </div>
+    <div class="stat-tile">
+      <div class="s-label">Flood Risk</div>
+      <div class="s-val" id="sFlood">—</div>
+      <div class="s-note" id="sFloodNote">—</div>
+    </div>
+    <div class="stat-tile">
+      <div class="s-label">Visibility</div>
+      <div class="s-val" id="sVis">—</div>
+      <div class="s-note" id="sVisNote">—</div>
+    </div>
+    <div class="stat-tile">
+      <div class="s-label">12h Trend</div>
+      <div class="s-val" id="sTrend" style="font-size:18px;padding-top:6px">—</div>
+      <div class="s-note" id="sTrendNote">—</div>
+    </div>
+  </div>
+
+  <!-- BOTTOM PANELS -->
+  <div class="bottom-grid fade-in-3">
+    <div class="bottom-panel">
+      <div class="panel-title">School Delay Probability</div>
+      <div class="school-row">
+        <div class="school-pct" id="schoolPct">—</div>
+        <div class="bar-wrap">
+          <div class="bar-track"><div class="bar-fill" id="schoolBar" style="width:0%"></div></div>
+          <div class="bar-label" id="schoolNote">Calculating…</div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-panel">
+      <div class="panel-title">Decision Summary</div>
+      <ul class="decision-list" id="decisionList">
+        <li><span class="d-icon">⏳</span><span><span class="d-strong">Fetching data…</span><span class="d-note">One moment.</span></span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- EXTERNAL LINKS -->
+  <div class="tool-links fade-in-4">
+    <a class="tool-link" href="https://forecast.weather.gov/MapClick.php?CityName=Philadelphia&state=PA&site=PHI&textField1=39.9526&textField2=-75.1652" target="_blank" rel="noopener">↗ NWS Hourly Philly</a>
+    <a class="tool-link" href="https://alerts.weather.gov/search?area=PA" target="_blank" rel="noopener">↗ NWS Active Alerts PA</a>
+    <a class="tool-link" href="https://alerts.weather.gov/search?area=NJ" target="_blank" rel="noopener">↗ NWS Active Alerts NJ</a>
+    <a class="tool-link" href="https://www.511pa.com/" target="_blank" rel="noopener">↗ 511 PA Road Conditions</a>
+    <a class="tool-link" href="https://511nj.org/" target="_blank" rel="noopener">↗ 511 NJ Road Conditions</a>
+    <a class="tool-link" href="https://phillyweatherauthority.com/live-traffic-cameras/" target="_blank" rel="noopener">↗ Live Traffic Cams</a>
+  </div>
+
+</div><!-- /main -->
+
+<div class="page-footer">
+  <span>© <span id="footerYear"></span> Philly Weather Authority · <a href="https://phillyweatherauthority.com">phillyweatherauthority.com</a></span>
+  <span>Data: NWS api.weather.gov · Geocoding: OpenStreetMap Nominatim</span>
+</div>
+
+<script>
+// ═══════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════
+const DEFAULT = { lat: 39.9526, lon: -75.1652, name: 'Philadelphia, PA' };
+const NWS = 'https://api.weather.gov';
+
+// ═══════════════════════════════════
+// UTILS
+// ═══════════════════════════════════
+const $ = id => document.getElementById(id);
+const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+
+function colorClass(score) {
+  if (score < 25) return 'c-low';
+  if (score < 50) return 'c-mod';
+  if (score < 75) return 'c-high';
+  return 'c-severe';
+}
+
+function riskLabel(score) {
+  if (score < 15) return ['LOW RISK',      'Conditions look good for your commute.'];
+  if (score < 35) return ['SLIGHT RISK',   'Minor impacts possible — allow extra time.'];
+  if (score < 55) return ['MODERATE RISK', 'Noticeable impacts likely. Drive carefully.'];
+  if (score < 75) return ['HIGH RISK',     'Significant hazards. Consider delaying travel.'];
+  return            ['SEVERE RISK',   '⚠ Dangerous conditions. Avoid travel if possible.'];
+}
+
+// ═══════════════════════════════════
+// RISK ENGINE
+// ═══════════════════════════════════
+function computeRisk(periods, alerts) {
+  const w = periods.slice(0, 12);
+  let score = 0;
+  const factors = [];
+
+  // Temp
+  const temps = w.map(p => p.temperature);
+  const minTemp = Math.min(...temps);
+  if      (minTemp <= 32) { score += 20; factors.push({i:'🌡️', l:'Freezing temps',  n:`Low: ${minTemp}°F`}); }
+  else if (minTemp <= 38) { score += 8;  factors.push({i:'🌡️', l:'Near-freezing',   n:`Low: ${minTemp}°F`}); }
+
+  // Precip
+  let pScore = 0, pType = ['☀️','Clear'];
+  for (const p of w) {
+    const f = p.shortForecast.toLowerCase();
+    if      (f.includes('blizzard'))                                         { pScore = Math.max(pScore,40); pType=['❄️','Heavy Snow']; }
+    else if (f.includes('heavy snow'))                                       { pScore = Math.max(pScore,35); pType=['❄️','Heavy Snow']; }
+    else if (f.includes('snow') || f.includes('flurr'))                      { pScore = Math.max(pScore,25); if(pScore===25) pType=['🌨️','Snow']; }
+    else if (f.includes('ice') || f.includes('sleet') || f.includes('freez')){ pScore = Math.max(pScore,38); pType=['🧊','Ice/Sleet']; }
+    else if (f.includes('thunder'))                                          { pScore = Math.max(pScore,18); if(pScore===18) pType=['⛈️','Thunder']; }
+    else if (f.includes('rain') || f.includes('shower'))                     { pScore = Math.max(pScore,8);  if(pScore===8)  pType=['🌧️','Rain']; }
+    else if (f.includes('fog')  || f.includes('mist'))                       { pScore = Math.max(pScore,12); if(pScore===12) pType=['🌫️','Fog']; }
+  }
+  if (pScore > 0) { score += pScore; factors.push({i:pType[0], l:pType[1], n:`Precip +${pScore}pts`}); }
+
+  // Wind
+  const maxGust = Math.max(...w.map(p => parseInt(p.windSpeed) || 0));
+  if      (maxGust >= 45) { score += 20; factors.push({i:'💨', l:`Dangerous gusts ~${maxGust}mph`, n:'High wind level'}); }
+  else if (maxGust >= 30) { score += 12; factors.push({i:'💨', l:`Strong gusts ~${maxGust}mph`,    n:'Hazardous for tall vehicles'}); }
+  else if (maxGust >= 20) { score += 5;  factors.push({i:'💨', l:`Breezy ~${maxGust}mph`,          n:'Minor impact'}); }
+
+  // Alerts
+  let floodAlert = false;
+  for (const a of alerts) {
+    const evt = (a.properties?.event || '').toLowerCase();
+    if      (evt.includes('flood'))   { score += 20; floodAlert = true; factors.push({i:'🌊', l:'Flood alert active',  n:a.properties.event}); }
+    else if (evt.includes('blizzard') || evt.includes('ice storm') || evt.includes('winter storm')) { score += 25; factors.push({i:'⚠️', l:a.properties.event, n:'NWS warning'}); }
+    else if (evt.includes('warning')) { score += 10; factors.push({i:'⚠️', l:a.properties.event,  n:'NWS warning'}); }
+  }
+
+  score = Math.min(Math.round(score), 100);
+
+  // School
+  let schoolProb = 0;
+  const pn = pType[1].toLowerCase();
+  if (pn.includes('snow') || pn.includes('ice') || pn.includes('sleet')) schoolProb += 50;
+  if      (minTemp <= 10) schoolProb += 25;
+  else if (minTemp <= 20) schoolProb += 15;
+  else if (minTemp <= 32) schoolProb += 8;
+  if      (score >= 60)   schoolProb += 20;
+  else if (score >= 40)   schoolProb += 10;
+  schoolProb = Math.min(Math.round(schoolProb), 95);
+
+  // Trend
+  const f6  = w.slice(0,6).reduce((a,p)  => a + (parseInt(p.windSpeed)||0), 0) / 6;
+  const s6  = w.slice(6,12).reduce((a,p) => a + (parseInt(p.windSpeed)||0), 0) / 6;
+  const trendLabel = s6 > f6+5 ? '↑ Worsening' : f6 > s6+5 ? '↓ Improving' : '→ Steady';
+  const trendNote  = s6 > f6+5 ? 'Deteriorating through window' : f6 > s6+5 ? 'Easing through window' : 'Similar conditions ahead';
+
+  const fogPeriods = w.filter(p => p.shortForecast.toLowerCase().includes('fog') || p.shortForecast.toLowerCase().includes('mist'));
+
+  return { score, factors, minTemp, maxGust, pType, floodAlert, fogPeriods, trendLabel, trendNote, schoolProb, currentTemp: periods[0]?.temperature ?? '—' };
+}
+
+// ═══════════════════════════════════
+// RENDER
+// ═══════════════════════════════════
+function renderMain(r, locationLabel) {
+  const cls = colorClass(r.score);
+  const [lvl, summary] = riskLabel(r.score);
+  const hero = $('scoreHero');
+
+  ['c-low','c-mod','c-high','c-severe'].forEach(c => hero.classList.remove(c));
+  hero.classList.add(cls);
+
+  set('scoreBig',    r.score);
+  set('scoreLabel',  lvl);
+  set('scoreSummary', locationLabel ? `${locationLabel} · ${summary}` : summary);
+  set('scoreUpdated', new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}));
+
+  set('sRoadTemp',  `${r.currentTemp}°F`);
+  const rnClass = r.minTemp <= 32 ? 'bad' : r.minTemp <= 38 ? 'warn' : 'good';
+  $('sRoadNote').textContent = r.minTemp <= 32 ? '⚠ At/below freezing' : r.minTemp <= 38 ? 'Near-freezing overnight' : 'Above freezing';
+  $('sRoadNote').className = `s-note ${rnClass}`;
+
+  set('sPrecip',     r.pType[0]);
+  set('sPrecipNote', r.pType[1]);
+
+  set('sWind',     r.maxGust > 0 ? `${r.maxGust}mph` : '< 15');
+  const wClass = r.maxGust >= 30 ? 'bad' : r.maxGust >= 20 ? 'warn' : 'good';
+  $('sWindNote').textContent = r.maxGust >= 30 ? '⚠ Hazardous gusts' : r.maxGust >= 20 ? 'Breezy conditions' : 'Not a concern';
+  $('sWindNote').className = `s-note ${wClass}`;
+
+  set('sFlood',     r.floodAlert ? '⚠ Active' : '✓ None');
+  $('sFloodNote').textContent = r.floodAlert ? 'Flood alert in effect' : 'No flood alerts';
+  $('sFloodNote').className = `s-note ${r.floodAlert ? 'bad' : 'good'}`;
+
+  set('sVis',     r.fogPeriods.length > 0 ? '🌫 Low' : '✓ Good');
+  $('sVisNote').textContent = r.fogPeriods.length > 0 ? 'Fog in 12h window' : 'No visibility concerns';
+  $('sVisNote').className = `s-note ${r.fogPeriods.length > 0 ? 'warn' : 'good'}`;
+
+  set('sTrend',     r.trendLabel);
+  set('sTrendNote', r.trendNote);
+
+  // School bar
+  set('schoolPct', `${r.schoolProb}%`);
+  const bar = $('schoolBar');
+  bar.style.width = `${r.schoolProb}%`;
+  bar.style.background = r.schoolProb >= 60 ? 'var(--red)' : r.schoolProb >= 30 ? 'var(--amber)' : 'var(--green)';
+  set('schoolNote', r.schoolProb >= 60 ? 'Delay or closure likely' : r.schoolProb >= 30 ? 'Possible delay — check your district' : 'Normal schedule expected');
+
+  // Decision list
+  const items = r.factors.length > 0 ? r.factors : [{i:'✅', l:'No major hazards', n:'Conditions suitable for normal travel'}];
+  $('decisionList').innerHTML = items.map(f =>
+    `<li><span class="d-icon">${f.i}</span><span><span class="d-strong">${f.l}</span><span class="d-note">${f.n}</span></span></li>`
+  ).join('');
+}
+
+// ═══════════════════════════════════
+// NWS FETCH
+// ═══════════════════════════════════
+async function fetchForPoint(lat, lon) {
+  const pts = await fetch(`${NWS}/points/${lat.toFixed(4)},${lon.toFixed(4)}`).then(r => {
+    if (!r.ok) throw new Error(`NWS can't find location at ${lat.toFixed(2)}, ${lon.toFixed(2)} — may be outside NWS coverage`);
+    return r.json();
+  });
+  const [hourly, alertsRes] = await Promise.all([
+    fetch(pts.properties.forecastHourly).then(r => r.json()),
+    fetch(`${NWS}/alerts/active?point=${lat.toFixed(4)},${lon.toFixed(4)}`).then(r => r.json()).catch(() => ({features:[]}))
+  ]);
+  return { periods: hourly.properties.periods || [], alerts: alertsRes.features || [] };
+}
+
+// ═══════════════════════════════════
+// GEOCODING
+// ═══════════════════════════════════
+async function geocode(query) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=us`;
+  const res = await fetch(url, { headers: {'Accept-Language':'en', 'User-Agent':'PhillyWeatherAuthority/1.0'} });
+  if (!res.ok) throw new Error('Geocoder temporarily unavailable');
+  const data = await res.json();
+  if (!data.length) throw new Error(`Location not found: "${query}" — try adding a state abbreviation`);
+  return {
+    lat:  parseFloat(data[0].lat),
+    lon:  parseFloat(data[0].lon),
+    name: data[0].display_name.split(',').slice(0,2).join(',').trim()
+  };
+}
+
+// ═══════════════════════════════════
+// ROUTE HANDLER
+// ═══════════════════════════════════
+async function runRoute() {
+  const originVal = $('originInput').value.trim();
+  const destVal   = $('destInput').value.trim();
+  const status    = $('routeStatus');
+  const btn       = $('checkBtn');
+
+  if (!originVal && !destVal) {
+    $('compareRow').style.display = 'none';
+    status.textContent = 'Reloading Philadelphia defaults…';
+    status.className = 'route-status';
+    loadDefault();
+    return;
+  }
+  if (!originVal || !destVal) {
+    status.textContent = 'Enter both a FROM and TO location, or clear both to use Philadelphia defaults.';
+    status.className = 'route-status err';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  status.className = 'route-status';
+  status.textContent = 'Locating your route…';
+
+  try {
+    const [origin, dest] = await Promise.all([geocode(originVal), geocode(destVal)]);
+    status.textContent = `Fetching NWS data for ${origin.name} and ${dest.name}…`;
+
+    const [oData, dData] = await Promise.all([
+      fetchForPoint(origin.lat, origin.lon),
+      fetchForPoint(dest.lat, dest.lon)
+    ]);
+
+    const oRisk = computeRisk(oData.periods, oData.alerts);
+    const dRisk = computeRisk(dData.periods, dData.alerts);
+    const worstRisk = oRisk.score >= dRisk.score ? oRisk : dRisk;
+    const worstName = oRisk.score >= dRisk.score ? origin.name : dest.name;
+
+    // Render worst-case in main display
+    renderMain(worstRisk, `Worst-case: ${worstName}`);
+
+    // Show alert for worst-case point
+    const worstAlerts = oRisk.score >= dRisk.score ? oData.alerts : dData.alerts;
+    renderAlerts(worstAlerts);
+
+    // Comparison columns
+    const diff = Math.abs(oRisk.score - dRisk.score);
+    if (diff > 5) {
+      $('compareRow').style.display = 'grid';
+      const oBad = oRisk.score > dRisk.score;
+      renderComparePanel('Origin',      origin.name, oRisk, oBad,  'compareOriginPanel', 'compareOriginLoc', 'compareOriginScore', 'compareOriginLevel', 'compareOriginDetail');
+      renderComparePanel('Destination', dest.name,   dRisk, !oBad, 'compareDestPanel',   'compareDestLoc',   'compareDestScore',   'compareDestLevel',   'compareDestDetail');
+    } else {
+      $('compareRow').style.display = 'none';
+    }
+
+    const time = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    status.textContent = diff <= 5
+      ? `${origin.name} → ${dest.name} · Similar conditions at both ends · ${time}`
+      : `${origin.name} → ${dest.name} · Showing worst-case (${worstName}) · ${time}`;
+
+  } catch(e) {
+    console.error(e);
+    status.textContent = `⚠ ${e.message}`;
+    status.className = 'route-status err';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check Route';
+  }
+}
+
+function renderComparePanel(type, name, risk, isWorst, panelId, locId, scoreId, levelId, detailId) {
+  const cls = colorClass(risk.score);
+  const panel = $(panelId);
+  ['c-low','c-mod','c-high','c-severe'].forEach(c => panel.classList.remove(c));
+  panel.classList.add(cls);
+  $(locId).innerHTML = `${type === 'Origin' ? '📍' : '🏁'} ${name}${isWorst ? ' <span class="worst-pill">Worst</span>' : ''}`;
+  set(scoreId, risk.score);
+  $(scoreId).className = `compare-score-num`;
+  set(levelId, riskLabel(risk.score)[0]);
+  set(detailId, `${risk.pType[0]} ${risk.pType[1]} · Low ${risk.minTemp}°F · Gusts ${risk.maxGust}mph`);
+}
+
+// ═══════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════
+function renderAlerts(alerts) {
+  if (alerts.length > 0) {
+    const top = alerts[0].properties;
+    $('alertStrip').classList.add('active');
+    set('alertTitle', top.event);
+    set('alertDesc', (top.headline || top.description || '').slice(0, 200) + (top.headline?.length > 200 ? '…' : ''));
+  } else {
+    $('alertStrip').classList.remove('active');
+  }
+}
+
+// ═══════════════════════════════════
+// DEFAULT LOAD
+// ═══════════════════════════════════
+async function loadDefault() {
+  try {
+    const data = await fetchForPoint(DEFAULT.lat, DEFAULT.lon);
+    renderMain(computeRisk(data.periods, data.alerts), null);
+    renderAlerts(data.alerts);
+    $('routeStatus').textContent = `Showing: ${DEFAULT.name} · Updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`;
+  } catch(e) {
+    console.error('Default load error:', e);
+    set('scoreLabel',   'Data Unavailable');
+    set('scoreSummary', 'Could not reach NWS API — try refreshing the page.');
+    $('routeStatus').textContent = '⚠ NWS API unavailable';
+  }
+}
+
+// ═══════════════════════════════════
+// INIT
+// ═══════════════════════════════════
+$('footerYear').textContent = new Date().getFullYear();
+['originInput','destInput'].forEach(id =>
+  $(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') runRoute(); })
+);
+loadDefault();
+setInterval(loadDefault, 15 * 60 * 1000);
+</script>
+</body>
+</html>
