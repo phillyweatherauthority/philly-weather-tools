@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commute Risk Index – Philly Region</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e8eaf0;
+      --muted: #6b7080;
+      --accent: #4f8ef7;
+      --green: #34c97a;
+      --yellow: #f5c842;
+      --orange: #f58c42;
+      --red: #f74f4f;
+      --mono: 'DM Mono', monospace;
+      --sans: 'DM Sans', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      padding: 0;
+      margin: 0;
+    }
+
+    .widget {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 24px 20px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      gap: 12px;
+    }
+    .header-left h2 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text);
+    }
+    .header-left p {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+      font-family: var(--mono);
+    }
+    .last-updated {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    /* Risk Score Banner */
+    .risk-banner {
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      border: 1px solid var(--border);
+      transition: background 0.4s ease, border-color 0.4s ease;
+      background: var(--surface);
+    }
+    .risk-score-circle {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 3px solid currentColor;
+      transition: color 0.4s ease;
+    }
+    .risk-score-circle .score-num {
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .risk-score-circle .score-max {
+      font-size: 9px;
+      opacity: 0.6;
+      font-family: var(--mono);
+    }
+    .risk-info h3 {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .risk-info p {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Color coding */
+    .risk-low    { color: var(--green);  }
+    .risk-mod    { color: var(--yellow); }
+    .risk-high   { color: var(--orange); }
+    .risk-severe { color: var(--red);    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 520px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .stat-card .stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin-bottom: 6px;
+    }
+    .stat-card .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      font-family: var(--mono);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-card .stat-note {
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* School & Decision */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 520px) {
+      .bottom-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .panel h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin-bottom: 12px;
+    }
+
+    /* School prob bar */
+    .school-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .school-pct {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 500;
+      min-width: 64px;
+    }
+    .school-bar-wrap {
+      flex: 1;
+    }
+    .school-bar-bg {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .school-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--yellow);
+      transition: width 0.6s ease;
+    }
+    .school-note {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Decision bullets */
+    .decision-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .decision-list li {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .decision-list li .bullet-icon {
+      font-size: 13px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .decision-list li .bullet-text strong {
+      display: block;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .decision-list li .bullet-text small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    /* Alert banner */
+    .alert-strip {
+      background: rgba(247, 79, 79, 0.12);
+      border: 1px solid rgba(247, 79, 79, 0.35);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #f79090;
+      display: none;
+    }
+    .alert-strip.active { display: block; }
+    .alert-strip strong { display: block; margin-bottom: 2px; font-size: 13px; color: var(--red); }
+
+    /* Links */
+    .link-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .link-btn {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 5px 10px;
+      text-decoration: none;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+    .link-btn:hover { opacity: 1; }
+
+    /* Footer note */
+    .footer-note {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: var(--mono);
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      margin-top: 4px;
+    }
+
+    /* Loading pulse */
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+    .loading { animation: pulse 1.5s infinite; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+    /* Fade in */
+    @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation: fadeUp 0.4s ease forwards; }
+  </style>
+</head>
+<body>
+<div class="widget">
+
+  <div class="header">
+    <div class="header-left">
+      <h2>🚗 Commute Risk Index</h2>
+      <p>Philadelphia Region · NWS data · no API key</p>
+    </div>
+    <div class="last-updated" id="lastUpdated">Fetching…</div>
+  </div>
+
+  <!-- Active alert strip -->
+  <div class="alert-strip" id="alertStrip">
+    <strong id="alertTitle">—</strong>
+    <span id="alertDesc">—</span>
+  </div>
+
+  <!-- Main risk banner -->
+  <div class="risk-banner fade-in" id="riskBanner">
+    <div class="risk-score-circle risk-low" id="scoreCircle">
+      <span class="score-num" id="scoreNum">—</span>
+      <span class="score-max">/100</span>
+    </div>
+    <div class="risk-info">
+      <h3 id="riskLabel" class="loading">Loading…</h3>
+      <p id="riskSummary">Fetching NWS hourly forecast + alerts…</p>
+    </div>
+  </div>
+
+  <!-- Stats grid -->
+  <div class="stats-grid fade-in">
+    <div class="stat-card">
+      <div class="stat-label">Road Temp (proxy)</div>
+      <div class="stat-value" id="roadTemp">—</div>
+      <div class="stat-note" id="roadTempNote">Air temp used as proxy</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Precip Type</div>
+      <div class="stat-value" style="font-size:28px" id="precipType">—</div>
+      <div class="stat-note" id="precipDetail">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Wind Gusts</div>
+      <div class="stat-value" id="windGusts">—</div>
+      <div class="stat-note" id="windDetail">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Flood Risk</div>
+      <div class="stat-value" style="font-size:20px" id="floodRisk">—</div>
+      <div class="stat-note" id="floodDetail">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Visibility Risk</div>
+      <div class="stat-value" style="font-size:20px" id="visRisk">—</div>
+      <div class="stat-note" id="visDetail">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Next 12h Trend</div>
+      <div class="stat-value" style="font-size:20px" id="trend">—</div>
+      <div class="stat-note" id="trendDetail">—</div>
+    </div>
+  </div>
+
+  <!-- Bottom grid: school + decisions -->
+  <div class="bottom-grid fade-in">
+    <div class="panel">
+      <h4>School Delay Probability</h4>
+      <div class="school-row">
+        <div class="school-pct" id="schoolProb">—</div>
+        <div class="school-bar-wrap">
+          <div class="school-bar-bg">
+            <div class="school-bar-fill" id="schoolBar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="school-note" id="schoolNote">Calculating…</div>
+    </div>
+    <div class="panel">
+      <h4>Decision Summary</h4>
+      <ul class="decision-list" id="decisionList">
+        <li><span class="bullet-icon">⏳</span><span class="bullet-text"><strong>Loading…</strong><small>Give it a second.</small></span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Links -->
+  <div class="link-row">
+    <a class="link-btn" id="nwsHourlyLink" href="https://forecast.weather.gov/MapClick.php?CityName=Philadelphia&state=PA&site=PHI&textField1=39.9526&textField2=-75.1652" target="_blank" rel="noopener">↗ NWS Hourly</a>
+    <a class="link-btn" id="nwsAlertsLink" href="https://alerts.weather.gov/search?area=PA" target="_blank" rel="noopener">↗ NWS Alerts</a>
+    <a class="link-btn" href="https://www.511pa.com/" target="_blank" rel="noopener">↗ 511 PA Traffic</a>
+  </div>
+
+  <div class="footer-note" style="margin-top:12px">
+    Risk index is heuristic (0–100). Main drivers: freezing precip, snow/ice, strong gusts, flood alerts. Data: NWS api.weather.gov.
+  </div>
+
+</div>
+
+<script>
+// ─── CONFIG ──────────────────────────────────────────────
+const LAT = 39.9526;
+const LON = -75.1652;
+const NWS_BASE = 'https://api.weather.gov';
+
+// ─── HELPERS ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function setRiskColor(el, score) {
+  el.classList.remove('risk-low','risk-mod','risk-high','risk-severe');
+  if (score < 25)      el.classList.add('risk-low');
+  else if (score < 50) el.classList.add('risk-mod');
+  else if (score < 75) el.classList.add('risk-high');
+  else                 el.classList.add('risk-severe');
+}
+
+function scoreToLabel(s) {
+  if (s < 15) return ['Low Risk', 'Conditions look good for your commute.'];
+  if (s < 35) return ['Slight Risk', 'Minor impacts possible — allow extra time.'];
+  if (s < 55) return ['Moderate Risk', 'Noticeable impacts likely. Drive carefully.'];
+  if (s < 75) return ['High Risk', 'Significant hazards. Consider delaying travel.'];
+  return ['Severe Risk', '⚠️ Dangerous conditions. Avoid travel if possible.'];
+}
+
+function precipEmoji(shortForecast) {
+  const f = shortForecast.toLowerCase();
+  if (f.includes('blizzard') || f.includes('heavy snow')) return ['❄️', 'Heavy Snow'];
+  if (f.includes('snow') || f.includes('flurr'))          return ['🌨️', 'Snow / Flurries'];
+  if (f.includes('ice') || f.includes('sleet') || f.includes('freez')) return ['🧊', 'Ice / Freezing'];
+  if (f.includes('thunder'))                               return ['⛈️', 'Thunderstorm'];
+  if (f.includes('rain') || f.includes('shower'))         return ['🌧️', 'Rain / Showers'];
+  if (f.includes('fog') || f.includes('mist'))            return ['🌫️', 'Fog / Mist'];
+  if (f.includes('cloud') || f.includes('overcast'))      return ['☁️', 'Cloudy'];
+  if (f.includes('partly'))                                return ['⛅', 'Partly Cloudy'];
+  return ['☀️', 'Clear / Fair'];
+}
+
+// ─── RISK SCORING ────────────────────────────────────────
+function computeRisk(periods, alerts) {
+  let score = 0;
+  const factors = [];
+
+  // Use first 4 periods (~12 hours of 3-hr blocks, or 12 1-hr blocks)
+  const window = periods.slice(0, 12);
+
+  // Temperature
+  const temps = window.map(p => p.temperature);
+  const minTemp = Math.min(...temps);
+  const maxTemp = Math.max(...temps);
+
+  if (minTemp <= 32) {
+    score += 20;
+    factors.push({ icon: '🌡️', label: 'Freezing temps', note: `Low of ${minTemp}°F` });
+  } else if (minTemp <= 38) {
+    score += 8;
+    factors.push({ icon: '🌡️', label: 'Near-freezing temps', note: `Low of ${minTemp}°F` });
+  }
+
+  // Precipitation / weather
+  let precipScore = 0;
+  let precipType = ['☀️', 'Clear / Fair'];
+  for (const p of window) {
+    const f = p.shortForecast.toLowerCase();
+    if (f.includes('blizzard')) { precipScore = Math.max(precipScore, 40); precipType = ['❄️','Heavy Snow']; }
+    else if (f.includes('heavy snow')) { precipScore = Math.max(precipScore, 35); precipType = ['❄️','Heavy Snow']; }
+    else if (f.includes('snow') || f.includes('flurr')) { precipScore = Math.max(precipScore, 25); if (precipScore >= 25) precipType = ['🌨️','Snow']; }
+    else if (f.includes('ice') || f.includes('sleet') || f.includes('freez')) { precipScore = Math.max(precipScore, 38); precipType = ['🧊','Ice/Sleet']; }
+    else if (f.includes('thunder')) { precipScore = Math.max(precipScore, 18); if (precipScore === 18) precipType = ['⛈️','Thunderstorm']; }
+    else if (f.includes('rain') || f.includes('shower')) { precipScore = Math.max(precipScore, 8); if (precipScore === 8) precipType = ['🌧️','Rain']; }
+    else if (f.includes('fog') || f.includes('mist')) { precipScore = Math.max(precipScore, 12); if (precipScore === 12) precipType = ['🌫️','Fog']; }
+  }
+  if (precipScore > 0) {
+    score += precipScore;
+    factors.push({ icon: precipType[0], label: precipType[1], note: `Precip risk +${precipScore}pts` });
+  }
+
+  // Wind
+  let maxGust = 0;
+  let gustPeriod = null;
+  for (const p of window) {
+    const ws = parseInt(p.windSpeed) || 0;
+    if (ws > maxGust) { maxGust = ws; gustPeriod = p; }
+  }
+  if (maxGust >= 45) {
+    score += 20;
+    factors.push({ icon: '💨', label: `Dangerous gusts ~${maxGust}mph`, note: 'High wind warning level' });
+  } else if (maxGust >= 30) {
+    score += 12;
+    factors.push({ icon: '💨', label: `Strong gusts ~${maxGust}mph`, note: 'Hazardous for high-profile vehicles' });
+  } else if (maxGust >= 20) {
+    score += 5;
+    factors.push({ icon: '💨', label: `Breezy ~${maxGust}mph`, note: 'Minor impact' });
+  }
+
+  // Alerts
+  let floodAlert = false;
+  let severeAlert = false;
+  for (const a of alerts) {
+    const evt = (a.properties.event || '').toLowerCase();
+    if (evt.includes('flood')) { score += 20; floodAlert = true; factors.push({ icon: '🌊', label: 'Flood alert active', note: a.properties.event }); }
+    else if (evt.includes('blizzard') || evt.includes('ice storm') || evt.includes('winter storm')) { score += 25; severeAlert = true; factors.push({ icon: '⚠️', label: a.properties.event, note: 'NWS active warning' }); }
+    else if (evt.includes('warning')) { score += 10; factors.push({ icon: '⚠️', label: a.properties.event, note: 'Active NWS warning' }); }
+  }
+
+  // Cap
+  score = Math.min(score, 100);
+
+  return { score: Math.round(score), factors, minTemp, maxGust, precipType, floodAlert, severeAlert };
+}
+
+// School delay heuristic
+function computeSchool(score, minTemp, precipType) {
+  let prob = 0;
+  const pName = precipType[1].toLowerCase();
+  if (pName.includes('snow') || pName.includes('ice') || pName.includes('sleet')) prob += 50;
+  if (minTemp <= 10) prob += 25;
+  else if (minTemp <= 20) prob += 15;
+  else if (minTemp <= 32) prob += 8;
+  if (score >= 60) prob += 20;
+  else if (score >= 40) prob += 10;
+  prob = Math.min(prob, 95);
+  return Math.round(prob);
+}
+
+// Trend
+function computeTrend(periods) {
+  if (periods.length < 6) return ['—', 'Not enough data'];
+  const firstHalf = periods.slice(0, 6);
+  const secondHalf = periods.slice(6, 12);
+  const avgFirst = firstHalf.reduce((a,p) => a + parseInt(p.windSpeed||0), 0) / 6;
+  const avgSecond = secondHalf.reduce((a,p) => a + parseInt(p.windSpeed||0), 0) / 6;
+  const tempFirst = firstHalf[0].temperature;
+  const tempLast = secondHalf[secondHalf.length-1]?.temperature || tempFirst;
+  if (avgSecond > avgFirst + 5) return ['↑ Worsening', 'Conditions deteriorating later'];
+  if (avgFirst > avgSecond + 5) return ['↓ Improving', 'Conditions easing off'];
+  return ['→ Steady', 'Similar conditions through commute window'];
+}
+
+// ─── MAIN FETCH + RENDER ─────────────────────────────────
+async function load() {
+  try {
+    // 1. Get NWS grid from lat/lon
+    const pointsRes = await fetch(`${NWS_BASE}/points/${LAT},${LON}`);
+    if (!pointsRes.ok) throw new Error('NWS points lookup failed');
+    const pointsData = await pointsRes.json();
+
+    const hourlyUrl = pointsData.properties.forecastHourly;
+    const alertsUrl = `${NWS_BASE}/alerts/active?point=${LAT},${LON}`;
+
+    // 2. Fetch hourly forecast + alerts in parallel
+    const [hourlyRes, alertsRes] = await Promise.all([
+      fetch(hourlyUrl),
+      fetch(alertsUrl)
+    ]);
+
+    if (!hourlyRes.ok) throw new Error('Hourly forecast unavailable');
+    const hourlyData = await hourlyRes.json();
+    const alertsData = alertsRes.ok ? await alertsRes.json() : { features: [] };
+
+    const periods = hourlyData.properties.periods || [];
+    const alerts  = alertsData.features || [];
+    const current = periods[0];
+
+    // 3. Compute
+    const { score, factors, minTemp, maxGust, precipType, floodAlert } = computeRisk(periods, alerts);
+    const schoolProb = computeSchool(score, minTemp, precipType);
+    const [trendLabel, trendNote] = computeTrend(periods);
+    const [riskLabel, riskSummary] = scoreToLabel(score);
+
+    // 4. Render score
+    $('scoreNum').textContent = score;
+    $('riskLabel').textContent = riskLabel;
+    $('riskLabel').classList.remove('loading');
+    $('riskSummary').textContent = riskSummary;
+    setRiskColor($('scoreCircle'), score);
+    setRiskColor($('riskLabel'), score);
+
+    // 5. Stats
+    $('roadTemp').textContent = `${current.temperature}°F`;
+    $('roadTempNote').textContent = minTemp <= 32 ? '⚠️ At or below freezing!' : 'Air temp used as proxy';
+
+    $('precipType').textContent = precipType[0];
+    $('precipDetail').textContent = precipType[1];
+
+    $('windGusts').textContent = maxGust > 0 ? `${maxGust} mph` : '< 15 mph';
+    $('windDetail').textContent = maxGust >= 30 ? '⚠️ Hazardous gusts' : maxGust >= 20 ? 'Breezy conditions' : 'Winds not a concern';
+
+    $('floodRisk').textContent = floodAlert ? '⚠️ Active' : '✅ None';
+    $('floodDetail').textContent = floodAlert ? 'Flood alert in effect' : 'No flood alerts';
+
+    // Visibility
+    const fogPeriods = periods.slice(0,12).filter(p => p.shortForecast.toLowerCase().includes('fog') || p.shortForecast.toLowerCase().includes('mist'));
+    $('visRisk').textContent = fogPeriods.length > 0 ? '🌫️ Reduced' : '✅ Good';
+    $('visDetail').textContent = fogPeriods.length > 0 ? 'Fog/mist in forecast' : 'No visibility concerns';
+
+    $('trend').textContent = trendLabel.split(' ')[0];
+    $('trendDetail').textContent = trendNote;
+
+    // 6. School
+    $('schoolProb').textContent = `${schoolProb}%`;
+    $('schoolBar').style.width = `${schoolProb}%`;
+    $('schoolBar').style.background = schoolProb >= 60 ? 'var(--orange)' : schoolProb >= 30 ? 'var(--yellow)' : 'var(--green)';
+    $('schoolNote').textContent = schoolProb >= 60 ? 'Delay or closure likely' :
+                                   schoolProb >= 30 ? 'Possible delay — check district' :
+                                   'Normal schedule expected';
+
+    // 7. Decisions
+    const bullets = factors.length > 0 ? factors : [{ icon: '✅', label: 'No major hazards', note: 'Normal commute expected' }];
+    $('decisionList').innerHTML = bullets.map(b =>
+      `<li><span class="bullet-icon">${b.icon}</span><span class="bullet-text"><strong>${b.label}</strong><small>${b.note}</small></span></li>`
+    ).join('');
+
+    // 8. Alerts banner
+    if (alerts.length > 0) {
+      const top = alerts[0].properties;
+      $('alertStrip').classList.add('active');
+      $('alertTitle').textContent = top.event;
+      $('alertDesc').textContent = (top.headline || top.description || '').slice(0, 160) + '…';
+    }
+
+    // 9. Links
+    $('nwsHourlyLink').href = pointsData.properties.forecastHourly.replace('api.weather.gov', 'forecast.weather.gov').replace('/gridpoints/', '/MapClick.php?') || 'https://www.weather.gov';
+    $('nwsHourlyLink').href = `https://forecast.weather.gov/MapClick.php?CityName=Philadelphia&state=PA&site=PHI&textField1=${LAT}&textField2=${LON}`;
+    $('nwsAlertsLink').href = `https://alerts.weather.gov/search?area=PA`;
+
+    // 10. Timestamp
+    const now = new Date();
+    $('lastUpdated').textContent = `Updated ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+
+  } catch (err) {
+    console.error(err);
+    $('riskLabel').textContent = 'Data unavailable';
+    $('riskLabel').classList.remove('loading');
+    $('riskSummary').textContent = 'Could not reach NWS API. Try refreshing.';
+    $('lastUpdated').textContent = 'Failed to load';
+  }
+}
+
+// Run on load + refresh every 15 min
+load();
+setInterval(load, 15 * 60 * 1000);
+</script>
+</body>
+</html>
