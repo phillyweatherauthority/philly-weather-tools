@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Model Center · Philly Weather Authority</title>
+  <meta name="description" content="Philadelphia-focused model viewer with quick access to HRRR, GFS, NAM, and ECMWF forecasts from leading sources."/>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --bg-2: #0f1420;
+      --panel: #1a2236;
+      --text: #e8ecf7;
+      --text-dim: #8996b8;
+      --line: rgba(255,255,255,.08);
+      --cyan: #22d3ee;
+      --purple: #a855f7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Rajdhani', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    
+    .header {
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--line);
+      padding: 16px 20px;
+    }
+    .brand {
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: 1400px; margin: 0 auto;
+    }
+    .brand h1 {
+      font-size: 20px; font-weight: 700;
+      letter-spacing: .5px;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .back-link {
+      font-size: 13px; color: var(--text-dim);
+      text-decoration: none;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+    .back-link:hover { color: var(--cyan); }
+    
+    .quick-links {
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--line);
+      padding: 12px 20px;
+    }
+    .quick-links-inner {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .link-btn {
+      padding: 8px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all .15s;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+    .link-btn:hover {
+      border-color: var(--cyan);
+      background: rgba(34,211,238,.1);
+      color: var(--cyan);
+    }
+    .link-btn.active {
+      background: linear-gradient(135deg, rgba(34,211,238,.2), rgba(168,85,247,.2));
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 20px auto;
+      padding: 0 20px;
+    }
+    .iframe-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .iframe-wrap iframe {
+      width: 100%;
+      height: 85vh;
+      border: none;
+      display: block;
+    }
+    .footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: 'IBM Plex Mono', monospace;
+    }
+    .footer a { color: var(--cyan); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="brand">
+      <h1>🌐 MODEL CENTER · Philly Weather Authority</h1>
+      <a class="back-link" href="https://phillyweatherauthority.com">← Back to site</a>
+    </div>
+  </div>
+
+  <div class="quick-links">
+    <div class="quick-links-inner">
+      <a class="link-btn active" href="#" data-url="https://www.pivotalweather.com/model.php?m=hrrr&p=ref_frzn&r=us_ne&h=0">
+        HRRR · Simulated Radar
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=hrrr&p=sfct&r=us_ne&h=0">
+        HRRR · Temperature
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=hrrr&p=sn_acc&r=us_ne&h=0">
+        HRRR · Snow
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=gfs&p=sfct&r=us_ne&h=0">
+        GFS · Temperature
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=gfs&p=sn_acc&r=us_ne&h=0">
+        GFS · Snow
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=ecmwf_full&p=sfct&r=us_ne&h=0">
+        ECMWF · Temperature
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=nam&p=sfct&r=us_ne&h=0">
+        NAM · Temperature
+      </a>
+      <a class="link-btn" href="#" data-url="https://www.pivotalweather.com/model.php?m=rrfs_a&p=ref_frzn&r=us_ne&h=0">
+        RRFS-A · Sim Radar
+      </a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="iframe-wrap">
+      <iframe id="modelFrame" src="https://www.pivotalweather.com/model.php?m=hrrr&p=ref_frzn&r=us_ne&h=0"></iframe>
+    </div>
+  </div>
+
+  <div class="footer">
+    Model data from <a href="https://www.pivotalweather.com" target="_blank">Pivotal Weather</a> · 
+    Curated for Philadelphia by <a href="https://phillyweatherauthority.com" target="_blank">Philly Weather Authority</a>
+  </div>
+
+<script>
+const frame = document.getElementById('modelFrame');
+const links = document.querySelectorAll('.link-btn');
+
+links.forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const url = link.dataset.url;
+    
+    // Update active state
+    links.forEach(l => l.classList.remove('active'));
+    link.classList.add('active');
+    
+    // Load in iframe
+    frame.src = url;
+  });
+});
+</script>
+</body>
+</html>
