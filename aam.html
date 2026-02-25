@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Relative AAM (GEOS) - PhillyWeatherAuthority</title>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root{
+      --bg:#f4f6f8; --card:#fff; --border:#e6e6e6; --text:#111827; --muted:#4b5563;
+      --pill-bg:#eef2ff; --pill-border:#dbe4ff; --pill-text:#1f2a66;
+    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:16px;background:var(--bg);color:var(--text);}
+    .wrap{max-width:980px;margin:0 auto;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:12px;}
+    h1{font-size:18px;margin:0 0 10px;}
+    .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+    .pill{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--pill-bg);border:1px solid var(--pill-border);color:var(--pill-text);white-space:nowrap;}
+    label{font-size:12px;color:var(--muted);}
+    select,button{padding:8px 10px;border-radius:12px;border:1px solid #d0d0d0;background:#fff;font-size:13px;}
+    button{cursor:pointer;}
+    button:hover{background:#f2f2f2;}
+    #chart{height:560px;}
+    .status{font-size:12px;color:var(--muted);white-space:pre-wrap;line-height:1.35;margin-top:8px;}
+    .small{font-size:12px;color:var(--muted);margin-top:6px;}
+    code{background:#f3f4f6;padding:2px 6px;border-radius:8px;}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Relative Atmospheric Angular Momentum (GEOS Forecast)</h1>
+
+    <div class="bar" style="margin-bottom:10px;">
+      <span class="pill">Source: <code id="src">./data/aam_latest.txt</code></span>
+      <span class="pill" id="rowsPill">Rows: -</span>
+      <span class="pill" id="updatedPill">Updated: -</span>
+    </div>
+
+    <div class="bar">
+      <div>
+        <label for="xmode">X axis</label><br/>
+        <select id="xmode">
+          <option value="auto" selected>Auto (best guess)</option>
+          <option value="time">Time (date + lead)</option>
+          <option value="lead">Lead only</option>
+          <option value="index">Row index</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="ycol">Y column</label><br/>
+        <select id="ycol"></select>
+      </div>
+
+      <div>
+        <label for="scale">Y scale</label><br/>
+        <select id="scale">
+          <option value="auto" selected>Auto</option>
+          <option value="raw">Raw</option>
+          <option value="mul1e25">× 1e25</option>
+          <option value="div1e25">÷ 1e25</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="smooth">Smoothing</label><br/>
+        <select id="smooth">
+          <option value="0" selected>None</option>
+          <option value="3">3-pt mean</option>
+          <option value="5">5-pt mean</option>
+          <option value="9">9-pt mean</option>
+        </select>
+      </div>
+
+      <div>
+        <label>&nbsp;</label><br/>
+        <button id="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="small">
+      Tip: If you get a flat line, try a different Y column. This file can contain many series; not all are “relative AAM anomaly”.
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div id="chart"></div>
+  </div>
+</div>
+
+<script>
+const DATA_URL = "./data/aam_latest.txt";
+
+const statusEl = document.getElementById("status");
+const rowsPill = document.getElementById("rowsPill");
+const updatedPill = document.getElementById("updatedPill");
+const ycolEl = document.getElementById("ycol");
+const xmodeEl = document.getElementById("xmode");
+const scaleEl = document.getElementById("scale");
+const smoothEl = document.getElementById("smooth");
+const refreshBtn = document.getElementById("refresh");
+
+function setStatus(msg){ statusEl.textContent = msg; }
+function setPill(el, txt){ el.textContent = txt; }
+
+function movingAverage(arr, k){
+  if (!k || k <= 1) return arr.slice();
+  const out = new Array(arr.length).fill(null);
+  const half = Math.floor(k/2);
+  for (let i=0;i<arr.length;i++){
+    let sum=0, cnt=0;
+    for (let j=i-half;j<=i+half;j++){
+      if (j>=0 && j<arr.length && Number.isFinite(arr[j])) { sum += arr[j]; cnt++; }
+    }
+    out[i] = cnt ? (sum/cnt) : null;
+  }
+  return out;
+}
+
+function parseDateToken(tok){
+  // supports YYYYMMDD, YYYY-MM-DD, YYYY/MM/DD
+  if (!tok) return null;
+  if (/^\d{8}$/.test(tok)){
+    const y=+tok.slice(0,4), m=+tok.slice(4,6), d=+tok.slice(6,8);
+    return new Date(Date.UTC(y, m-1, d, 0,0,0));
+  }
+  const m = tok.match(/^(\d{4})[-\/](\d{2})[-\/](\d{2})$/);
+  if (m){
+    const y=+m[1], mo=+m[2], d=+m[3];
+    return new Date(Date.UTC(y, mo-1, d, 0,0,0));
+  }
+  return null;
+}
+
+function toNum(tok){
+  const v = Number(tok);
+  return Number.isFinite(v) ? v : NaN;
+}
+
+function parseFile(text){
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  const meta = { firstLine: null, dateLikeCount: 0, maxCols: 0 };
+
+  for (const line of lines){
+    const s = line.trim();
+    if (!s) continue;
+    if (s.startsWith("#") || s.startsWith("%") || s.startsWith("//")) continue;
+
+    const parts = s.split(/\s+/);
+    if (parts.length < 2) continue;
+
+    if (!meta.firstLine) meta.firstLine = s;
+
+    const nums = parts.map(toNum).filter(Number.isFinite);
+    if (nums.length >= 2){
+      rows.push({ parts, nums });
+      meta.maxCols = Math.max(meta.maxCols, nums.length);
+      if (parseDateToken(parts[0])) meta.dateLikeCount++;
+    }
+  }
+
+  return { rows, meta };
+}
+
+function populateYCols(colCount){
+  ycolEl.innerHTML = "";
+  for (let i=0;i<colCount;i++){
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `Column ${i+1}`;
+    ycolEl.appendChild(opt);
+  }
+  ycolEl.value = String(colCount - 1);
+}
+
+function variance(arr){
+  let n=0, mean=0, M2=0;
+  for (const v of arr){
+    if (!Number.isFinite(v)) continue;
+    n++;
+    const d = v - mean;
+    mean += d/n;
+    M2 += d*(v-mean);
+  }
+  return n>1 ? M2/(n-1) : 0;
+}
+
+function autoPickY(parsedRows, colCount){
+  let best = colCount - 1;
+  let bestScore = -1;
+
+  for (let c=0;c<colCount;c++){
+    const y = parsedRows.map(r => r.nums[c]).filter(Number.isFinite);
+    if (y.length < Math.max(20, parsedRows.length*0.3)) continue;
+    const v = variance(y);
+    const range = Math.max(...y) - Math.min(...y);
+    const score = v + range*range*0.01;
+    if (score > bestScore){
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
+function buildX(parsedRows){
+  const mode = xmodeEl.value;
+
+  const hasDateLead = parsedRows.length > 0 && parsedRows.every(r => {
+    const d = parseDateToken(r.parts[0]);
+    const lead = toNum(r.parts[1]);
+    return d && Number.isFinite(lead);
+  });
+
+  if (mode === "index"){
+    return { x: parsedRows.map((_,i)=>i), xLabel: "Row index", isTime: false };
+  }
+
+  if (mode === "lead"){
+    if (parsedRows.length && Number.isFinite(toNum(parsedRows[0].parts[1]))){
+      return { x: parsedRows.map(r=>toNum(r.parts[1])), xLabel: "Lead (file units)", isTime: false };
+    }
+    return { x: parsedRows.map((_,i)=>i), xLabel: "Row index (fallback)", isTime: false };
+  }
+
+  if (mode === "time"){
+    if (hasDateLead){
+      const x = parsedRows.map(r => {
+        const base = parseDateToken(r.parts[0]);
+        const leadHours = toNum(r.parts[1]); // assume hours
+        const dt = new Date(base.getTime() + leadHours*3600*1000);
+        return dt.toISOString();
+      });
+      return { x, xLabel: "Time (UTC)", isTime: true };
+    }
+    return { x: parsedRows.map((_,i)=>i), xLabel: "Row index (fallback)", isTime: false };
+  }
+
+  // auto
+  if (hasDateLead){
+    const x = parsedRows.map(r => {
+      const base = parseDateToken(r.parts[0]);
+      const leadHours = toNum(r.parts[1]);
+      const dt = new Date(base.getTime() + leadHours*3600*1000);
+      return dt.toISOString();
+    });
+    return { x, xLabel: "Time (UTC) (auto)", isTime: true };
+  }
+
+  return { x: parsedRows.map((_,i)=>i), xLabel: "Row index (auto)", isTime: false };
+}
+
+function applyScale(y){
+  const mode = scaleEl.value;
+  if (mode === "raw") return { y, suffix: "" };
+  if (mode === "mul1e25") return { y: y.map(v => Number.isFinite(v) ? v*1e25 : v), suffix: " (×1e25)" };
+  if (mode === "div1e25") return { y: y.map(v => Number.isFinite(v) ? v/1e25 : v), suffix: " (÷1e25)" };
+
+  const finite = y.filter(Number.isFinite);
+  if (!finite.length) return { y, suffix: "" };
+  const maxAbs = Math.max(...finite.map(v => Math.abs(v)));
+
+  if (maxAbs < 1e-6) return { y: y.map(v => Number.isFinite(v) ? v*1e25 : v), suffix: " (auto ×1e25)" };
+  if (maxAbs > 1e10) return { y: y.map(v => Number.isFinite(v) ? v/1e25 : v), suffix: " (auto ÷1e25)" };
+  return { y, suffix: "" };
+}
+
+function plot(parsedRows, colCount){
+  const yIdx = Number(ycolEl.value);
+  const yRaw = parsedRows.map(r => r.nums[yIdx]);
+  const ySm = movingAverage(yRaw, Number(smoothEl.value));
+  const scaled = applyScale(ySm);
+
+  const xBuilt = buildX(parsedRows);
+
+  const trace = {
+    x: xBuilt.x,
+    y: scaled.y,
+    mode: "lines",
+    name: `Column ${yIdx+1}`,
+    hovertemplate: "%{x}<br>%{y}<extra></extra>"
+  };
+
+  const layout = {
+    title: "Relative AAM vs Time",
+    xaxis: {
+      title: xBuilt.xLabel,
+      showgrid: true,
+      tickformat: xBuilt.isTime ? "%b\n%Y" : undefined
+    },
+    yaxis: {
+      title: `Column ${yIdx+1}${Number(smoothEl.value)>1 ? ` (smoothed ${smoothEl.value}-pt)` : ""}${scaled.suffix}`,
+      showgrid: true,
+      zeroline: false
+    },
+    shapes: [{
+      type:"line",
+      xref:"paper", x0:0, x1:1,
+      y0:0, y1:0,
+      line:{dash:"dash", width:1}
+    }],
+    margin:{l:70,r:20,t:50,b:70}
+  };
+
+  Plotly.newPlot("chart", [trace], layout, { responsive: true });
+}
+
+async function fetchAndRender(){
+  setStatus("Loading latest AAM data...");
+  const url = DATA_URL + "?_ts=" + Date.now();
+
+  try{
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+
+    const parsed = parseFile(text);
+    if (!parsed.rows.length){
+      setPill(rowsPill, "Rows: 0");
+      setStatus("Fetched file but couldn't find numeric rows to plot.\nCheck that ./data/aam_latest.txt contains the raw numeric table.");
+      return;
+    }
+
+    const parsedRows = parsed.rows;
+    const colCount = parsed.meta.maxCols;
+
+    if (!ycolEl.options.length || ycolEl.options.length !== colCount){
+      populateYCols(colCount);
+      ycolEl.value = String(autoPickY(parsedRows, colCount));
+    }
+
+    plot(parsedRows, colCount);
+
+    setPill(rowsPill, `Rows: ${parsedRows.length}`);
+    setPill(updatedPill, `Updated: ${new Date().toUTCString()}`);
+
+    const pct = Math.round(100 * parsed.meta.dateLikeCount / parsedRows.length);
+    setStatus(
+      `OK - Parsed ${parsedRows.length} rows x ${colCount} cols.\n` +
+      `Date-like first token detected in ~${pct}% of rows.\n` +
+      `If you want month/year ticks like the reference plot, set X axis to “Time (date + lead)”.\n` +
+      `If values look too small/large, set Y scale to ×1e25 (matches many published AAM plots).`
+    );
+  } catch(e){
+    setStatus("Fetch error: " + String(e) + "\nMake sure GitHub Pages is enabled and ./data/aam_latest.txt exists.");
+  }
+}
+
+function rerender(){ fetchAndRender(); }
+
+ycolEl.addEventListener("change", rerender);
+xmodeEl.addEventListener("change", rerender);
+scaleEl.addEventListener("change", rerender);
+smoothEl.addEventListener("change", rerender);
+refreshBtn.addEventListener("click", fetchAndRender);
+
+fetchAndRender();
+</script>
+</body>
+</html>
