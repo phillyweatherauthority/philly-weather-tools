@@ -1,0 +1,26 @@
+name: Update AAM Data
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download latest AAM file
+        run: |
+          curl -s https://aam.earthrotation.net/aam_fcs_ser/aam_geos_fcs.txt -o data/aam_latest.txt
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/aam_latest.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update AAM data"
+          git push
