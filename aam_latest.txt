@@ -1,0 +1,4 @@
+phillyweatherauthority/
+  ├── data/
+  │     └── aam_latest.txt   (empty for now)
+  └── aam.html
