@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Global AAM Anomaly (Base 1980–2010) - PhillyWeatherAuthority</title>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root{--bg:#f4f6f8;--card:#fff;--border:#e6e6e6;--text:#111827;--muted:#4b5563;--pill-bg:#eef2ff;--pill-border:#dbe4ff;--pill-text:#1f2a66;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:16px;background:var(--bg);color:var(--text);}
+    .wrap{max-width:980px;margin:0 auto;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:12px;}
+    h1{font-size:18px;margin:0 0 8px;}
+    .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+    .pill{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--pill-bg);border:1px solid var(--pill-border);color:var(--pill-text);white-space:nowrap;}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+    .btn{border:1px solid #d0d0d0;background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer;}
+    .btn.active{background:#111827;color:#fff;border-color:#111827;}
+    #chart{height:560px;}
+    .status{font-size:12px;color:var(--muted);white-space:pre-wrap;line-height:1.35;margin-top:10px;}
+    code{background:#f3f4f6;padding:2px 6px;border-radius:8px;}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>GLOBAL AAM ANOM</h1>
+    <div class="bar">
+      <span class="pill">Source: <code>./data/aam_latest.txt</code></span>
+      <span class="pill" id="seriesPill">Series: -</span>
+      <span class="pill" id="basePill">Base: 1980-01 to 2010-12</span>
+      <span class="pill" id="rowsPill">Rows: -</span>
+      <span class="pill" id="updatedPill">Updated: -</span>
+      <span class="pill" id="modePill">Y: σ units (≈ ±4)</span>
+    </div>
+
+    <div class="btns" id="rangeBtns" aria-label="Date range">
+      <button class="btn active" data-range="all">All</button>
+      <button class="btn" data-range="90">90d</button>
+      <button class="btn" data-range="60">60d</button>
+      <button class="btn" data-range="30">30d</button>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div id="chart"></div>
+  </div>
+</div>
+
+<script>
+const DATA_URL = "./data/aam_latest.txt";
+
+// Base period (inclusive)
+const BASE_START = Date.UTC(1980, 0, 1, 0, 0, 0);       // 1980-01-01
+const BASE_END   = Date.UTC(2010, 11, 31, 23, 59, 59);  // 2010-12-31
+
+const statusEl = document.getElementById("status");
+const seriesPill = document.getElementById("seriesPill");
+const rowsPill = document.getElementById("rowsPill");
+const updatedPill = document.getElementById("updatedPill");
+const modePill = document.getElementById("modePill");
+const rangeBtns = document.getElementById("rangeBtns");
+
+let STATE = {
+  allRows: [],
+  seriesName: "-",
+  seriesIndex: 0,
+  rangeDays: "all",
+  baseMean: 0,
+  baseStd: 1,
+  baseCount: 0,
+  usedFallbackBase: false
+};
+
+function setStatus(msg){ statusEl.textContent = msg; }
+
+function parseAAMDate(tok){
+  const m = String(tok || "").match(/^(\d{4})\.(\d{2})\.(\d{2})-(\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+}
+
+function toNum(tok){
+  const s = String(tok ?? "").replace(/d/gi, "E"); // FORTRAN D exponent -> E
+  const v = Number(s);
+  return Number.isFinite(v) ? v : NaN;
+}
+
+function extractHeaderNames(text){
+  const lines = text.split(/\r?\n/);
+  for (const line of lines){
+    const s = line.trim();
+    if (!s.startsWith("#")) continue;
+    const t = s.replace(/^#+\s*/, "");
+    if (/\bDate\b/.test(t) && /\bMJD\b/.test(t)){
+      return t.split(/\s+/).filter(Boolean);
+    }
+  }
+  return null;
+}
+
+function parseRows(text){
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  for (const line of lines){
+    const s = line.trim();
+    if (!s || s.startsWith("#") || s.startsWith("%") || s.startsWith("//")) continue;
+    const parts = s.split(/\s+/);
+    if (parts.length < 6) continue;
+    const dt = parseAAMDate(parts[0]);
+    if (!dt) continue;
+    const nums = parts.slice(1).map(toNum);
+    const finiteCount = nums.filter(Number.isFinite).length;
+    if (finiteCount >= 5) rows.push({ dt, nums });
+  }
+  return rows;
+}
+
+function variance(arr){
+  let n=0, mean=0, M2=0;
+  for (const v of arr){
+    if (!Number.isFinite(v)) continue;
+    n++;
+    const d = v - mean;
+    mean += d/n;
+    M2 += d*(v-mean);
+  }
+  return n>1 ? M2/(n-1) : 0;
+}
+
+function chooseSeriesIndex(mappedNames, rows, dataCols){
+  const prefs = ["EF3_noIB","EF3_IB","EF2_noIB","EF2_IB","EF1_noIB","EF1_IB"];
+  if (mappedNames){
+    for (const p of prefs){
+      const idx = mappedNames.findIndex(n => n.toUpperCase() === p.toUpperCase());
+      if (idx !== -1) return idx;
+    }
+  }
+  let best = 0, bestScore = -Infinity;
+  for (let c=0;c<dataCols;c++){
+    const y = rows.map(r => r.nums[c]).filter(Number.isFinite);
+    if (y.length < Math.max(200, rows.length*0.4)) continue;
+    const abs = y.map(v => Math.abs(v)).sort((a,b)=>a-b);
+    const med = abs[Math.floor(abs.length/2)] || 0;
+    const v = variance(y);
+    const penalty = med > 1e12 ? Math.log10(med) : 0;
+    const score = Math.log10(v + 1e-300) - penalty;
+    if (score > bestScore){ bestScore = score; best = c; }
+  }
+  return best;
+}
+
+function meanStd(values){
+  let n=0, mean=0, M2=0;
+  for (const v of values){
+    if (!Number.isFinite(v)) continue;
+    n++;
+    const d = v - mean;
+    mean += d/n;
+    M2 += d*(v-mean);
+  }
+  const var_ = (n>1) ? (M2/(n-1)) : 0;
+  return { mean, std: Math.sqrt(var_) || 1, n };
+}
+
+function filterByRange(rows, rangeDays){
+  if (rangeDays === "all") return rows;
+  const days = Number(rangeDays);
+  if (!Number.isFinite(days) || days <= 0) return rows;
+  const maxT = rows[rows.length-1].dt.getTime();
+  const minT = maxT - days*24*3600*1000;
+  return rows.filter(r => r.dt.getTime() >= minT);
+}
+
+function computeBaseStats(rows, idx){
+  const baseVals = rows
+    .filter(r => {
+      const t = r.dt.getTime();
+      return t >= BASE_START && t <= BASE_END;
+    })
+    .map(r => r.nums[idx]);
+
+  let stats = meanStd(baseVals);
+  let usedFallback = false;
+
+  // If this file doesn't include 1980–2010 (e.g., forecast-only file), fall back to full series.
+  if (stats.n < 100){
+    stats = meanStd(rows.map(r => r.nums[idx]));
+    usedFallback = true;
+  }
+  return { ...stats, usedFallback };
+}
+
+function plot(){
+  const all = STATE.allRows;
+  if (!all.length) return;
+
+  const filtered = filterByRange(all, STATE.rangeDays);
+  const idx = STATE.seriesIndex;
+
+  const x = filtered.map(r => r.dt.toISOString());
+  const yRaw = filtered.map(r => r.nums[idx]);
+
+  // Base-period standardized anomaly (sigma units)
+  const yAnom = yRaw.map(v => Number.isFinite(v) ? (v - STATE.baseMean) / STATE.baseStd : v);
+
+  Plotly.newPlot("chart", [{
+    x,
+    y: yAnom,
+    mode: "lines",
+    name: STATE.seriesName,
+    hovertemplate: "%{x|%Y-%m-%d %H:%M} UTC<br>σ anomaly: %{y:.2f}<extra></extra>"
+  }],{
+    xaxis: { title: "", tickformat: "%b\n%Y", showgrid: true },
+    yaxis: { title: "", showgrid: true, zeroline: false, range: [-4, 4] },
+    shapes: [{ type:"line", xref:"paper", x0:0, x1:1, y0:0, y1:0, line:{dash:"dash", width:1} }],
+    margin: { l: 60, r: 20, t: 10, b: 70 }
+  }, { responsive:true });
+
+  modePill.textContent = "Y: σ anomaly (base 1980–2010)";
+  rowsPill.textContent = `Rows: ${filtered.length}`;
+}
+
+function setActiveBtn(range){
+  [...rangeBtns.querySelectorAll(".btn")].forEach(b => b.classList.toggle("active", b.dataset.range === range));
+}
+
+rangeBtns.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-range]");
+  if (!btn) return;
+  STATE.rangeDays = btn.dataset.range;
+  setActiveBtn(STATE.rangeDays);
+  plot();
+});
+
+async function main(){
+  setStatus("Loading latest AAM data...");
+  const url = DATA_URL + "?_ts=" + Date.now();
+
+  try{
+    const r = await fetch(url, { cache:"no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+
+    const rows = parseRows(text);
+    if (!rows.length){
+      setStatus("Could not parse data rows. Expected timestamp like 2015.07.20-12:00:00\n" +
+                "If the file is a placeholder or HTML, ensure GitHub Actions is writing raw numeric text to data/aam_latest.txt.");
+      rowsPill.textContent = "Rows: 0";
+      return;
+    }
+
+    const dataCols = rows[0].nums.length;
+    const header = extractHeaderNames(text);
+    const mappedNames = (header && header.length >= dataCols+1) ? header.slice(1, 1+dataCols) : null;
+
+    const idx = chooseSeriesIndex(mappedNames, rows, dataCols);
+    const seriesName = mappedNames ? mappedNames[idx] : `Column ${idx+1}`;
+
+    const base = computeBaseStats(rows, idx);
+
+    STATE.allRows = rows;
+    STATE.seriesIndex = idx;
+    STATE.seriesName = seriesName;
+    STATE.baseMean = base.mean;
+    STATE.baseStd = base.std;
+    STATE.baseCount = base.n;
+    STATE.usedFallbackBase = base.usedFallback;
+
+    seriesPill.textContent = `Series: ${seriesName}`;
+    updatedPill.textContent = `Updated: ${new Date().toUTCString()}`;
+
+    const baseMsg = base.usedFallback
+      ? "Base period not present in this file → using full-series baseline."
+      : `Base stats from ${base.n} points within 1980–2010.`;
+
+    setStatus(
+      `Auto-selected: ${seriesName}\n` +
+      `${baseMsg}\n` +
+      `Y-axis shows standardized anomaly (σ) and is fixed to [-4, +4].\n` +
+      `Use 30/60/90 day buttons to change the window (x-axis stays month/year).`
+    );
+
+    plot();
+  } catch(e){
+    setStatus("Fetch error: " + String(e));
+  }
+}
+
+main();
+</script>
+</body>
+</html>
