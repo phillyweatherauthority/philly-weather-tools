@@ -39,14 +39,15 @@ jobs:
       - name: Fetch NCEP/NCAR uwnd and compute relative AAM by latitude
         run: python scripts/fetch_aam_latlon.py
 
-      - name: Commit and push updated data file
+      - name: Commit and push updated data files
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/aam_lat_latest.txt
+          git add data/aam_climo.npz 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "chore: update aam_lat_latest.txt [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git commit -m "chore: update AAM lat data [$(date -u '+%Y-%m-%d %H:%M UTC')]"
             git push
           fi
