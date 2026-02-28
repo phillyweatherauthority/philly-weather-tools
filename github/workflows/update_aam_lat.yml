@@ -1,0 +1,52 @@
+name: Update Relative AAM (Latitude) Data
+
+on:
+  schedule:
+    # Runs at 06:30 UTC daily — NCEP/NCAR reanalysis typically updated ~6 UTC
+    - cron: '30 6 * * *'
+  workflow_dispatch:   # allow manual runs
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-aam-lat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90     # base-period fetch can take ~60 min first run
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-aam-lat-${{ hashFiles('**/requirements_aam_lat.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-aam-lat-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install netCDF4 numpy
+
+      - name: Fetch NCEP/NCAR uwnd and compute relative AAM by latitude
+        run: python scripts/fetch_aam_latlon.py
+
+      - name: Commit and push updated data file
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/aam_lat_latest.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update aam_lat_latest.txt [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git push
+          fi
