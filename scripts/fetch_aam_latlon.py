@@ -39,10 +39,10 @@ G  = 9.80665          # gravity (m/s^2)
 BASE_START = datetime(1980, 1, 1, tzinfo=timezone.utc)
 BASE_END   = datetime(2010, 12, 31, tzinfo=timezone.utc)
 
-# Days of NCEP/NCAR reanalysis data to fetch for the "recent" window.
-# We fetch the last RECENT_YEARS years for the anomaly plot, plus the
-# entire base period for climatology computation.
-RECENT_YEARS = 5
+# Number of days of recent data to save in the output file.
+# Keep this small — 60 days is plenty for subseasonal AAM monitoring
+# and makes the HTML chart load near-instantly.
+RECENT_DAYS = 60
 
 # PSL OPeNDAP base URL for daily-average uwnd on pressure levels
 OPENDAP_BASE = (
@@ -150,9 +150,10 @@ def main():
     now = datetime.now(timezone.utc)
     current_year = now.year
 
-    # Years to fetch for recent display
-    recent_start_year = current_year - RECENT_YEARS
-    recent_years = list(range(recent_start_year, current_year + 1))
+    # Only need the last RECENT_DAYS of data for display.
+    # We fetch the current year and previous year (in case we're early January).
+    cutoff_dt   = now - timedelta(days=RECENT_DAYS)
+    recent_years = sorted({cutoff_dt.year, current_year})
 
     # Years needed for base-period climatology (1980–2010)
     base_years = list(range(1980, 2011))
@@ -203,10 +204,10 @@ def main():
     for year in recent_years:
         try:
             dates, aam, ld, lp = fetch_year(year)
-            # Trim to only past dates (no future)
             for i, d in enumerate(dates):
                 dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-                if dt <= now:
+                # Only keep days within our recent window and not in the future
+                if cutoff_dt <= dt <= now:
                     all_dates.append(dt)
                     all_aam.append(aam[i])
         except Exception as e:
