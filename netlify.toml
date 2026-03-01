@@ -1,2 +1,7 @@
 [functions]
 directory = "netlify/functions"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Content-Type = "text/html; charset=utf-8"
