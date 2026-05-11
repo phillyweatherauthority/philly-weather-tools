@@ -1,0 +1,67 @@
+name: Update Relative AAM (Latitude) Data
+
+on:
+  schedule:
+    # 12:00 UTC daily — ERA5 has a ~5-day lag so exact timing matters less;
+    # midday avoids CDS peak-hour queuing.
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-aam-lat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180    # climatology build on first run: ~2–3 hrs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-aam-era5-${{ hashFiles('**/requirements_aam_lat.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-aam-era5-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_aam_lat.txt
+
+      # Cache the 1980–2010 climatology so it only builds once.
+      # To force a rebuild: bump CLIMO_KEY below, or delete the cache
+      # manually via Actions → Caches in the GitHub UI.
+      - name: Cache ERA5 climatology
+        uses: actions/cache@v4
+        with:
+          path: data/aam_climo.npz
+          key: aam-climo-era5-1980-2010-v1
+          restore-keys: |
+            aam-climo-era5-
+
+      - name: Fetch ERA5 uwnd and compute relative AAM by latitude
+        env:
+          CDS_API_KEY: ${{ secrets.CDS_API_KEY }}
+        run: python scripts/fetch_aam_latlon.py
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/aam_lat_latest.txt
+          git add data/aam_climo.npz 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update AAM lat data (ERA5) [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git push
+          fi
