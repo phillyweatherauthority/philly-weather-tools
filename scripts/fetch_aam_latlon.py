@@ -1,247 +1,366 @@
 #!/usr/bin/env python3
 """
 fetch_aam_latlon.py
--------------------
-Fetches NCEP/NCAR Reanalysis 1 daily-average u-wind on pressure levels
-from NOAA PSL's OPeNDAP server, computes the vertically and zonally
-integrated relative atmospheric angular momentum (AAM) at each latitude
-band, then writes a compact text file consumed by aam_hovmoller.html.
+────────────────────────────────────────────────────────────────────────────────
+Computes relative atmospheric angular momentum (AAM) anomaly by latitude band
+from ERA5 reanalysis and writes data/aam_lat_latest.txt for the
+PhillyWeatherAuthority Hovmöller diagram.
 
-Climatology caching
--------------------
-On the FIRST run, the script fetches 1980-2010 base period data (~45 min),
-computes the per-latitude mean and std, and saves them to:
-    data/aam_climo.npz
+SOURCE  : ERA5 hourly data on pressure levels (reanalysis-era5-pressure-levels)
+          via ECMWF Copernicus Climate Data Store (CDS) API.
+          Coverage: 1940–present, updated daily with ~5-day lag.
+          https://cds.climate.copernicus.eu/datasets/reanalysis-era5-pressure-levels
 
-On every SUBSEQUENT run, it loads that cached file instead — skipping the
-entire base period fetch. Daily runs therefore take ~2 minutes.
+METHOD  : Relative (wind-term) AAM per latitude band:
+            M(φ) = (2π/g) · cos²φ · a³ · Ω · Σ_p [ ū(φ,p) · Δp ]
+          where ū is the zonal-mean daily-average u-wind summed over
+          all pressure levels.  Anomalies are standardised σ departures
+          from the 1980–2010 daily climatology (31-day centred smoothing).
 
-Physics
--------
-  M(phi) = (2*pi*a^2 * cos^2(phi) / g) * sum_p [ u(phi,p) * dp ]
+OUTPUT  : data/aam_lat_latest.txt   — rolling 90-day window
+          data/aam_climo.npz        — cached climatology (rebuilt if missing)
 
-where a = 6.371e6 m, g = 9.81 m/s^2, phi = latitude (rad),
-p = pressure level (Pa), dp = layer thickness (Pa).
+AUTH    : Reads the CDS personal access token from the environment variable
+          CDS_API_KEY.  In GitHub Actions add this as a repository secret.
+          The script writes ~/.cdsapirc at runtime — nothing is committed.
 
-Output format (data/aam_lat_latest.txt)
----------------------------------------
-Header lines beginning with '#':
-  # GLOBAL_AAM_LAT_ANOM
-  # Base: 1980-01-01 to 2010-12-31
-  # Units: sigma anomaly
-  # Lats: -88.75 -86.25 ... 88.75
-  # Cols: Date  lat[0] lat[1] ... lat[N-1]
-Data rows (one per day, chronological):
-  YYYY.MM.DD  val0 val1 ... valN
+DEPENDENCIES: cdsapi, netCDF4, numpy
+────────────────────────────────────────────────────────────────────────────────
 """
 
-import sys
+import argparse
+import calendar
 import os
-from datetime import datetime, timedelta, timezone
+import sys
+import time
+import tempfile
+from datetime import date, timedelta
+from pathlib import Path
+
 import numpy as np
+import cdsapi
+from netCDF4 import Dataset  # noqa: N813
 
-# ── constants ──────────────────────────────────────────────────────────────
-A  = 6.371e6   # Earth radius (m)
-G  = 9.80665   # gravity (m/s^2)
+# ── constants ────────────────────────────────────────────────────────────────
+OMEGA = 7.292115e-5   # Earth rotation rate (rad/s)
+A     = 6.371e6       # Earth radius (m)
+G     = 9.80665       # standard gravity (m/s²)
 
-BASE_START = datetime(1980, 1, 1, tzinfo=timezone.utc)
-BASE_END   = datetime(2010, 12, 31, tzinfo=timezone.utc)
+# Full ERA5 pressure level set (hPa)
+PRESSURE_LEVELS = [
+    '1','2','3','5','7','10','20','30','50','70',
+    '100','125','150','175','200','225','250','300','350','400',
+    '450','500','550','600','650','700','750','775','800','825',
+    '850','875','900','925','950','975','1000'
+]
 
-# How many days of recent data to write to the output file
-RECENT_DAYS = 60
+# Climatology base period (matches original AER/R1 baseline)
+CLIMO_START = 1980
+CLIMO_END   = 2010
 
-# PSL OPeNDAP URL template
-OPENDAP_BASE = (
-    "https://psl.noaa.gov/thredds/dodsC/"
-    "Datasets/ncep.reanalysis.dailyavgs/pressure/uwnd.{year}.nc"
-)
+# Rolling output window in days
+WINDOW_DAYS = 90
 
-OUTPUT_PATH = os.path.join("data", "aam_lat_latest.txt")
-CLIMO_PATH  = os.path.join("data", "aam_climo.npz")
+# Smoothing half-width for daily climatology (31-day centred window)
+SMOOTH_HALF = 15
 
-# ── helpers ────────────────────────────────────────────────────────────────
+# ERA5 grid resolution for download (degrees)
+GRID = [1.0, 1.0]
 
-def open_nc(url):
-    try:
-        import netCDF4 as nc4
-        return nc4.Dataset(url)
-    except Exception as e:
-        raise RuntimeError(f"Cannot open {url}: {e}")
-
-
-def ncep_time_to_dates(time_var):
-    import netCDF4 as nc4
-    cal = time_var.calendar if hasattr(time_var, 'calendar') else 'standard'
-    return nc4.num2date(time_var[:], time_var.units, cal)
-
-
-def compute_aam_lat(uwnd_3d, lats_rad, levels_pa):
-    u = np.where(np.ma.getmaskarray(uwnd_3d), 0.0,
-                 np.asarray(uwnd_3d, dtype=np.float64))
-    u_zm = u.mean(axis=2)  # zonal mean → (nlev, nlat)
-
-    nlev = len(levels_pa)
-    dp = np.empty(nlev)
-    dp[0]  = levels_pa[1] - levels_pa[0]
-    dp[-1] = levels_pa[-1] - levels_pa[-2]
-    for k in range(1, nlev - 1):
-        dp[k] = (levels_pa[k+1] - levels_pa[k-1]) / 2.0
-    dp = np.abs(dp)
-
-    vert_int = np.sum(u_zm * dp[:, np.newaxis], axis=0) / G  # (nlat,)
-    cos2     = np.cos(lats_rad) ** 2
-    return 2.0 * np.pi * A**2 * cos2 * vert_int  # kg m^2 s^-1
+# Paths (script lives in scripts/, repo root is one level up)
+REPO_ROOT  = Path(__file__).resolve().parent.parent
+DATA_DIR   = REPO_ROOT / "data"
+OUTPUT_TXT = DATA_DIR / "aam_lat_latest.txt"
+CLIMO_NPZ  = DATA_DIR / "aam_climo.npz"
 
 
-def fetch_year(year):
-    """Fetch one year of daily uwnd and return AAM by latitude."""
-    url = OPENDAP_BASE.format(year=year)
-    print(f"  Fetching {url}", flush=True)
-    ds = open_nc(url)
+# ── auth ─────────────────────────────────────────────────────────────────────
 
-    lats_deg  = np.array(ds.variables['lat'][:])
-    levels_pa = np.array(ds.variables['level'][:]) * 100.0
-    dates     = ncep_time_to_dates(ds.variables['time'])
-    uwnd_var  = ds.variables['uwnd']
-
-    lats_rad = np.deg2rad(lats_deg)
-    nlat     = len(lats_deg)
-    ndays    = len(dates)
-    aam_all  = np.empty((ndays, nlat), dtype=np.float64)
-
-    for t in range(ndays):
-        aam_all[t] = compute_aam_lat(uwnd_var[t, :, :, :], lats_rad, levels_pa)
-
-    ds.close()
-    return dates, aam_all, lats_deg, levels_pa
-
-
-# ── climatology: load cache or compute from scratch ────────────────────────
-
-def load_climo():
-    """Load cached climatology. Returns (base_mean, base_std, lats_deg) or None."""
-    if not os.path.exists(CLIMO_PATH):
-        return None
-    print(f"Loading cached climatology from {CLIMO_PATH}", flush=True)
-    d = np.load(CLIMO_PATH)
-    return d['base_mean'], d['base_std'], d['lats_deg']
-
-
-def build_climo():
-    """Fetch 1980-2010, compute per-latitude mean & std, save to cache."""
-    print("=== No climatology cache found — fetching 1980–2010 base period ===")
-    print("    (This only happens once. Future runs will load the cache.)\n")
-
-    base_sums  = None
-    base_sum2  = None
-    base_count = None
-    lats_deg   = None
-    levels_pa  = None
-
-    for year in range(1980, 2011):
-        try:
-            dates, aam, ld, lp = fetch_year(year)
-            if lats_deg is None:
-                lats_deg  = ld
-                levels_pa = lp
-                nlat       = len(lats_deg)
-                base_sums  = np.zeros(nlat)
-                base_sum2  = np.zeros(nlat)
-                base_count = np.zeros(nlat, dtype=int)
-
-            for i, d in enumerate(dates):
-                dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-                if BASE_START <= dt <= BASE_END:
-                    base_sums  += aam[i]
-                    base_sum2  += aam[i] ** 2
-                    base_count += 1
-
-        except Exception as e:
-            print(f"  WARNING: could not fetch {year}: {e}", file=sys.stderr)
-
-    if base_count is None or base_count.min() == 0:
-        print("ERROR: base period data insufficient.", file=sys.stderr)
+def setup_cds_auth() -> None:
+    """Write ~/.cdsapirc from the CDS_API_KEY environment variable."""
+    key = os.environ.get("CDS_API_KEY", "").strip()
+    if not key:
+        print("ERROR: CDS_API_KEY environment variable is not set.", file=sys.stderr)
+        print("  GitHub Actions: add CDS_API_KEY as a repository secret.", file=sys.stderr)
+        print("  Local: export CDS_API_KEY=<your-personal-access-token>", file=sys.stderr)
         sys.exit(1)
-
-    base_mean = base_sums / base_count
-    base_var  = base_sum2 / base_count - base_mean ** 2
-    base_std  = np.sqrt(np.maximum(base_var, 1e-30))
-
-    # Save cache
-    np.savez(CLIMO_PATH, base_mean=base_mean, base_std=base_std, lats_deg=lats_deg)
-    print(f"\nClimatology cached to {CLIMO_PATH} "
-          f"({base_count.mean():.0f} days/lat)")
-
-    return base_mean, base_std, lats_deg
+    rc = Path.home() / ".cdsapirc"
+    rc.write_text(f"url: https://cds.climate.copernicus.eu/api\nkey: {key}\n")
+    log(f"CDS credentials written to {rc}")
 
 
-# ── main ───────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
-def main():
-    os.makedirs("data", exist_ok=True)
+def log(msg: str) -> None:
+    print(msg, flush=True)
 
-    now          = datetime.now(timezone.utc)
-    current_year = now.year
-    cutoff_dt    = now - timedelta(days=RECENT_DAYS)
 
-    # ── Step 1: get climatology (from cache or full fetch) ──────────────────
-    climo = load_climo()
-    if climo is None:
-        base_mean, base_std, lats_deg = build_climo()
-    else:
-        base_mean, base_std, lats_deg = climo
+def pressure_layer_dp(levels_pa: np.ndarray) -> np.ndarray:
+    """
+    Layer thicknesses (Pa) for vertically integrated AAM.
+    Expects levels_pa sorted descending (surface → top).
+    Edge levels get half the adjacent spacing.
+    """
+    n  = len(levels_pa)
+    dp = np.empty(n)
+    for i in range(n):
+        lo = levels_pa[i + 1] if i + 1 < n else levels_pa[i]
+        hi = levels_pa[i - 1] if i > 0      else levels_pa[i]
+        dp[i] = abs(hi - lo) / 2.0
+    return dp
 
-    # ── Step 2: fetch only the recent window (60 days) ─────────────────────
-    # We need at most two years: the current year and possibly the previous
-    # (e.g., if today is Jan 15, our 60-day window starts in mid-November)
-    recent_years = sorted({cutoff_dt.year, current_year})
-    print(f"\n=== Fetching recent data (last {RECENT_DAYS} days) ===", flush=True)
 
-    all_dates = []
-    all_aam   = []
+def doy365(d: date) -> int:
+    """1-based day-of-year, capped at 365 (leap days map to 365)."""
+    return min(d.timetuple().tm_yday, 365)
 
-    for year in recent_years:
+
+def smooth_circular(arr: np.ndarray, half: int) -> np.ndarray:
+    """Centred running mean over axis-0, wrapping at year boundaries."""
+    n   = arr.shape[0]
+    out = np.empty_like(arr)
+    for i in range(n):
+        idx    = [(i + k) % n for k in range(-half, half + 1)]
+        out[i] = arr[idx].mean(axis=0)
+    return out
+
+
+# ── ERA5 monthly fetch ────────────────────────────────────────────────────────
+
+def fetch_month(year: int, month: int) -> tuple[np.ndarray, list[date], np.ndarray]:
+    """
+    Download ERA5 u-wind on all pressure levels for one calendar month
+    (4× daily, then averaged to daily means).
+
+    Returns
+    -------
+    lats      (nlat,)        degrees, 90 N → 90 S
+    days      list[date]     dates in this month
+    aam       (ndays, nlat)  relative AAM per latitude (kg m s⁻¹ per unit width)
+    """
+    ndays     = calendar.monthrange(year, month)[1]
+    days_list = [date(year, month, d) for d in range(1, ndays + 1)]
+    days_str  = [f"{d:02d}" for d in range(1, ndays + 1)]
+
+    client  = cdsapi.Client(quiet=True)
+    request = {
+        "product_type":    ["reanalysis"],
+        "variable":        ["u_component_of_wind"],
+        "pressure_level":  PRESSURE_LEVELS,
+        "year":            [str(year)],
+        "month":           [f"{month:02d}"],
+        "day":             days_str,
+        "time":            ["00:00", "06:00", "12:00", "18:00"],
+        "data_format":     "netcdf",
+        "download_format": "unarchived",
+        "grid":            GRID,
+    }
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    for attempt in range(1, 4):
         try:
-            dates, aam, ld, lp = fetch_year(year)
-            for i, d in enumerate(dates):
-                dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-                if cutoff_dt <= dt <= now:
-                    all_dates.append(dt)
-                    all_aam.append(aam[i])
-        except Exception as e:
-            print(f"  WARNING: could not fetch {year}: {e}", file=sys.stderr)
+            client.retrieve("reanalysis-era5-pressure-levels", request, tmp_path)
+            break
+        except Exception as exc:
+            log(f"  [attempt {attempt}/3] CDS error: {exc}")
+            if attempt < 3:
+                time.sleep(60)
+            else:
+                raise
+
+    try:
+        ds    = Dataset(tmp_path)
+        u_var = ds.variables["u"]           # (time, level, lat, lon)
+
+        lats_deg = np.array(ds.variables["latitude"][:])
+        # level variable name varies slightly across ERA5 files
+        lev_key  = "pressure_level" if "pressure_level" in ds.variables else "level"
+        levs_hpa = np.array(ds.variables[lev_key][:])
+
+        # sort surface → top (descending hPa)
+        lev_order = np.argsort(levs_hpa)[::-1]
+        levs_pa   = levs_hpa[lev_order] * 100.0
+        dp        = pressure_layer_dp(levs_pa)                # (nlev,)
+
+        lats_rad  = np.deg2rad(lats_deg)
+        prefactor = (2.0 * np.pi / G) * np.cos(lats_rad) ** 2 * A**3 * OMEGA  # (nlat,)
+
+        ntimes         = u_var.shape[0]          # ndays × 4
+        steps_per_day  = ntimes // ndays
+        nlat           = len(lats_deg)
+        aam            = np.zeros((ndays, nlat), dtype=np.float64)
+
+        for t in range(ntimes):
+            day_idx = t // steps_per_day
+            if day_idx >= ndays:
+                break
+            u_raw = np.array(u_var[t, :, :, :])             # (level, lat, lon)
+            if hasattr(u_raw, "filled"):
+                u_raw = u_raw.filled(np.nan)
+            u_raw    = u_raw[lev_order, :, :]                # sort levels
+            u_zonal  = np.nanmean(u_raw, axis=2)             # (level, lat)
+            vert_int = np.nansum(u_zonal * dp[:, np.newaxis], axis=0)  # (lat,)
+            aam[day_idx] += prefactor * vert_int
+
+        aam /= steps_per_day      # time-mean → daily average
+        ds.close()
+
+    finally:
+        os.unlink(tmp_path)
+
+    return lats_deg, days_list, aam
+
+
+# ── climatology ───────────────────────────────────────────────────────────────
+
+def build_climatology(lats: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Download CLIMO_START–CLIMO_END and compute smoothed daily mean/std."""
+    log(f"Building ERA5 climatology {CLIMO_START}–{CLIMO_END} …")
+    nlat      = len(lats)
+    day_sum   = np.zeros((365, nlat), dtype=np.float64)
+    day_sum2  = np.zeros((365, nlat), dtype=np.float64)
+    day_count = np.zeros(365,         dtype=np.int32)
+
+    for yr in range(CLIMO_START, CLIMO_END + 1):
+        for mo in range(1, 13):
+            log(f"  {yr}-{mo:02d} …")
+            try:
+                _, days_list, aam_mo = fetch_month(yr, mo)
+            except Exception as exc:
+                log(f"  WARNING: skipping {yr}-{mo:02d}: {exc}")
+                continue
+            for i, d in enumerate(days_list):
+                doy = doy365(d) - 1
+                day_sum[doy]   += aam_mo[i]
+                day_sum2[doy]  += aam_mo[i] ** 2
+                day_count[doy] += 1
+
+    safe_n        = np.where(day_count > 0, day_count, 1)
+    mean_raw      = day_sum  / safe_n[:, np.newaxis]
+    var_raw       = day_sum2 / safe_n[:, np.newaxis] - mean_raw ** 2
+    std_raw       = np.sqrt(np.maximum(var_raw, 0.0))
+
+    climo_mean = smooth_circular(mean_raw, SMOOTH_HALF)
+    climo_std  = smooth_circular(std_raw,  SMOOTH_HALF)
+    climo_std  = np.where(climo_std > 0, climo_std, 1.0)
+
+    return climo_mean, climo_std
+
+
+def load_or_build_climatology(
+    lats: np.ndarray, rebuild: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
+    if not rebuild and CLIMO_NPZ.exists():
+        log(f"Loading cached climatology from {CLIMO_NPZ} …")
+        data = np.load(CLIMO_NPZ)
+        cm, cs, cl = data["climo_mean"], data["climo_std"], data["lats"]
+        if cm.shape[1] == len(lats) and np.allclose(cl, lats):
+            return cm, cs
+        log("  Grid mismatch — rebuilding.")
+
+    cm, cs = build_climatology(lats)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(CLIMO_NPZ, climo_mean=cm, climo_std=cs, lats=lats)
+    log(f"Climatology saved → {CLIMO_NPZ}")
+    return cm, cs
+
+
+# ── rolling window fetch ──────────────────────────────────────────────────────
+
+def fetch_recent(window_days: int) -> tuple[np.ndarray, list[date], np.ndarray]:
+    """
+    Fetch the most recent `window_days` of ERA5 data.
+    Requests an extra 10 days to absorb ERA5's ~5-day production lag.
+    """
+    today  = date.today()
+    start  = today - timedelta(days=window_days + 10)
+
+    # collect unique (year, month) pairs
+    months: set[tuple[int, int]] = set()
+    d = start.replace(day=1)
+    while d <= today:
+        months.add((d.year, d.month))
+        d = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+    log(f"Fetching recent ERA5 data window ({window_days}d, up to ~{today}) …")
+
+    lats: np.ndarray | None = None
+    all_dates: list[date]   = []
+    all_aam: list[np.ndarray] = []
+    cutoff = today - timedelta(days=window_days)
+
+    for yr, mo in sorted(months):
+        log(f"  {yr}-{mo:02d} …")
+        try:
+            yr_lats, days_list, aam_mo = fetch_month(yr, mo)
+        except Exception as exc:
+            log(f"  WARNING: could not fetch {yr}-{mo:02d}: {exc}")
+            continue
+        if lats is None:
+            lats = yr_lats
+        for i, d in enumerate(days_list):
+            if cutoff <= d <= today:
+                all_dates.append(d)
+                all_aam.append(aam_mo[i])
 
     if not all_dates:
-        print("ERROR: no recent data fetched.", file=sys.stderr)
+        print("ERROR: no recent ERA5 data retrieved.", file=sys.stderr)
         sys.exit(1)
 
-    # Sort chronologically
-    order     = np.argsort(all_dates)
-    all_dates = [all_dates[i] for i in order]
-    all_aam   = np.array([all_aam[i] for i in order])  # (ndays, nlat)
+    return lats, all_dates, np.array(all_aam)
 
-    # Standardise to sigma units
-    anom = (all_aam - base_mean[np.newaxis, :]) / base_std[np.newaxis, :]
 
-    # ── Step 3: write output ────────────────────────────────────────────────
-    lat_str = " ".join(f"{v:.2f}" for v in lats_deg)
+# ── output ────────────────────────────────────────────────────────────────────
 
-    with open(OUTPUT_PATH, "w") as f:
-        f.write("# GLOBAL_AAM_LAT_ANOM\n")
-        f.write(f"# Base: {BASE_START.strftime('%Y-%m-%d')} to "
-                f"{BASE_END.strftime('%Y-%m-%d')}\n")
-        f.write("# Units: sigma anomaly (standardised departure from "
-                "1980-2010 climatology)\n")
-        f.write("# Source: NCEP/NCAR Reanalysis 1, NOAA PSL OPeNDAP\n")
-        f.write(f"# Generated: {now.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
-        f.write(f"# Lats: {lat_str}\n")
-        f.write("# Cols: Date  lat[0..N-1]\n")
+def write_output(dates: list[date], lats: np.ndarray, anom: np.ndarray) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Relative AAM anomaly by latitude — ERA5 reanalysis",
+        "# Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels",
+        f"# Climatology base: {CLIMO_START}–{CLIMO_END} (31-day centred smoothing)",
+        "# Units: standardised sigma departures",
+        f"# Generated: {date.today().isoformat()}",
+        "# Lats: " + " ".join(f"{lat:.2f}" for lat in lats),
+    ]
+    for d, row in zip(dates, anom):
+        vals = " ".join(f"{v:8.4f}" for v in row)
+        lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
+    OUTPUT_TXT.write_text("\n".join(lines) + "\n")
+    log(f"Wrote {len(dates)} rows → {OUTPUT_TXT}")
 
-        for i, dt in enumerate(all_dates):
-            row_vals = " ".join(f"{v:.4f}" for v in anom[i])
-            f.write(f"{dt.strftime('%Y.%m.%d')}  {row_vals}\n")
 
-    print(f"\nWrote {len(all_dates)} rows × {len(lats_deg)} lats → {OUTPUT_PATH}")
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Fetch ERA5 relative AAM by latitude → Hovmöller data file."
+    )
+    parser.add_argument(
+        "--rebuild-climo", action="store_true",
+        help="Force rebuild of the 1980–2010 climatology even if cache exists."
+    )
+    parser.add_argument(
+        "--window", type=int, default=WINDOW_DAYS,
+        help=f"Rolling window in days (default: {WINDOW_DAYS})."
+    )
+    args = parser.parse_args()
+
+    setup_cds_auth()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    lats, dates, aam_recent         = fetch_recent(args.window)
+    climo_mean, climo_std           = load_or_build_climatology(lats, args.rebuild_climo)
+
+    log("Computing standardised anomalies …")
+    anom = np.empty_like(aam_recent)
+    for i, d in enumerate(dates):
+        doy      = doy365(d) - 1
+        anom[i]  = (aam_recent[i] - climo_mean[doy]) / climo_std[doy]
+
+    write_output(dates, lats, anom)
+    log("Done.")
 
 
 if __name__ == "__main__":
