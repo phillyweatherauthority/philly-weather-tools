@@ -1,0 +1,44 @@
+name: Build AAM Climatology (one-time)
+
+on:
+  workflow_dispatch:   # manual trigger only
+
+permissions:
+  contents: write
+
+jobs:
+  build-climo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360    # 6 hrs — 31 annual CDS requests, ~2–3 min each
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_aam_lat.txt
+
+      - name: Build 1980–2010 ERA5 climatology
+        env:
+          CDS_API_KEY: ${{ secrets.CDS_API_KEY }}
+        run: python scripts/fetch_aam_latlon.py --mode climo
+
+      - name: Commit climatology and checkpoint to repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/aam_climo.npz 2>/dev/null || true
+          git add data/aam_climo_checkpoint.npz 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: ERA5 AAM climatology progress [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git push
+          fi
