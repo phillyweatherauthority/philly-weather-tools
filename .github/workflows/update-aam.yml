@@ -1,23 +1,54 @@
-name: Update AAM Data
+name: Update Relative AAM (Latitude) Data
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    # 12:00 UTC daily — ERA5 has ~5-day lag so exact time matters less
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  update:
+  fetch-aam-lat:
     runs-on: ubuntu-latest
+    timeout-minutes: 30     # daily mode only fetches 2–3 months, should finish in <10 min
+
     steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p data
-      - run: curl -fsSL https://aam.earthrotation.net/aam_fcs_ser/aam_geos_fcs.txt -o data/aam_latest.txt
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/aam_latest.txt
-          git diff --staged --quiet || git commit -m "Auto-update AAM data"
-          git push
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-aam-era5-${{ hashFiles('**/requirements_aam_lat.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-aam-era5-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_aam_lat.txt
+
+      - name: Fetch ERA5 and compute relative AAM anomalies
+        env:
+          CDS_API_KEY: ${{ secrets.CDS_API_KEY }}
+        run: python scripts/fetch_aam_latlon.py --mode daily --window 60
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/aam_lat_latest.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update AAM lat data (ERA5) [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git push
+          fi
