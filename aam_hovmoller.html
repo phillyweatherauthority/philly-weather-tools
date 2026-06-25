@@ -148,8 +148,20 @@
   </div>
 
   <!-- ── chart card ─────────────────────────────────────────────── -->
-  <div class="card">
+  <div class="card" style="position:relative;">
     <div id="chart"></div>
+    <div style="
+      position: absolute;
+      bottom: 28px; right: 28px;
+      font-size: 15px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.82);
+      letter-spacing: 0.04em;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.55), 0 0 12px rgba(0,0,0,0.3);
+      pointer-events: none;
+      user-select: none;
+      font-family: system-ui, -apple-system, sans-serif;
+    ">© PhillyWeatherAuthority</div>
   </div>
 
 </div>
@@ -256,9 +268,21 @@ function filterByRange() {
 function buildZ(fd, fa) {
   const nlat = S.lats.length, ndays = fd.length;
   const z = [];
+  // Taper anomaly values toward zero approaching the poles.
+  // ERA5 polar grid cells have near-zero climatological std → division
+  // artifacts appear as saturated solid bands at 90N/90S.
+  // Rather than nulling them (abrupt cutoff) or showing the artifact,
+  // we blend each polar band toward zero using a cosine taper weight
+  // so real signals fade naturally to the pole edge.
+  const TAPER_BANDS = 4;  // number of bands from each pole to taper across
   for (let li = 0; li < nlat; li++) {
+    // distance from nearest pole in bands (0 = at pole, TAPER_BANDS = edge of taper zone)
+    const distFromPole = Math.min(li, nlat - 1 - li);
+    const weight = distFromPole >= TAPER_BANDS
+      ? 1.0
+      : 0.5 * (1 - Math.cos(Math.PI * distFromPole / TAPER_BANDS));  // cosine ramp 0→1
     const row = new Array(ndays);
-    for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li];
+    for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li] * weight;
     z.push(row);
   }
   return z;
@@ -351,16 +375,7 @@ function makeLayout() {
     },
     margin: { l: 70, r: 20, t: 10, b: 70 },
     paper_bgcolor: "#fff", plot_bgcolor: "#fff",
-    showlegend: false,
-    annotations: [{
-      text: "© PhillyWeatherAuthority",
-      x: 1, y: 0,
-      xref: "paper", yref: "paper",
-      xanchor: "right", yanchor: "bottom",
-      showarrow: false,
-      font: { size: 11, color: "rgba(80,80,80,0.45)" },
-      xshift: -6, yshift: 6
-    }]
+    showlegend: false
   };
 }
 
