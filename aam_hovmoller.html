@@ -330,10 +330,17 @@ function contoursOnlyTraces(x, z) {
 
 // ── layout ────────────────────────────────────────────────────────────────
 function makeLayout() {
+  const days = Number(S.rangeDays);
+  const dtick = days <= 14 ? 86400000      // daily
+              : days <= 60 ? 7 * 86400000  // weekly
+              : 14 * 86400000;             // fortnightly for 90d+
   return {
     xaxis: {
-      title: "", tickformat: "%b\n%Y",
-      showgrid: false, zeroline: false, type: "date"
+      title: "", type: "date",
+      dtick, tickformat: "%b %d",
+      tickangle: -40,
+      showgrid: true, gridcolor: "rgba(180,180,180,0.18)",
+      zeroline: false,
     },
     yaxis: {
       title: "Latitude",
@@ -344,7 +351,16 @@ function makeLayout() {
     },
     margin: { l: 70, r: 20, t: 10, b: 70 },
     paper_bgcolor: "#fff", plot_bgcolor: "#fff",
-    showlegend: false
+    showlegend: false,
+    annotations: [{
+      text: "© PhillyWeatherAuthority",
+      x: 1, y: 0,
+      xref: "paper", yref: "paper",
+      xanchor: "right", yanchor: "bottom",
+      showarrow: false,
+      font: { size: 11, color: "rgba(80,80,80,0.45)" },
+      xshift: -6, yshift: 6
+    }]
   };
 }
 
