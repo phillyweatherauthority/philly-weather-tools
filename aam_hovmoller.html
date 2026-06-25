@@ -10,6 +10,8 @@
       --bg: #f4f6f8; --card: #fff; --border: #e6e6e6;
       --text: #111827; --muted: #4b5563;
       --pill-bg: #eef2ff; --pill-border: #dbe4ff; --pill-text: #1f2a66;
+      --warn-bg: #fff7ed; --warn-border: #fed7aa; --warn-text: #9a3412;
+      --err-bg: #fef2f2; --err-border: #fecaca; --err-text: #991b1b;
     }
     body {
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -27,6 +29,22 @@
       background: var(--pill-bg); border: 1px solid var(--pill-border);
       color: var(--pill-text); white-space: nowrap;
     }
+
+    /* ── stale / error banner ── */
+    .banner {
+      display: none;
+      margin-top: 10px; padding: 8px 14px; border-radius: 10px;
+      font-size: 13px; line-height: 1.45; font-weight: 500;
+    }
+    .banner.warn {
+      background: var(--warn-bg); border: 1px solid var(--warn-border);
+      color: var(--warn-text);
+    }
+    .banner.error {
+      background: var(--err-bg); border: 1px solid var(--err-border);
+      color: var(--err-text);
+    }
+    .banner.show { display: block; }
 
     /* ── button rows ── */
     .btn-row {
@@ -60,7 +78,7 @@
     }
     .legend-grad {
       width: 160px; height: 10px; border-radius: 3px; flex-shrink: 0;
-      background: linear-gradient(to right, #053061, #4393c3, #f7f7f7, #d6604d, #67001f);
+      background: linear-gradient(to right, #08306b, #6baed6, #f7f7f7, #ffcc00, #ff8c00, #7f0000);
     }
     .legend-item { display: flex; align-items: center; gap: 6px; }
     .lline { width: 26px; height: 0; border: none; }
@@ -81,9 +99,13 @@
       <span class="pill">Base: 1980–2010</span>
       <span class="pill" id="rowsPill">Rows: —</span>
       <span class="pill" id="latsPill">Lats: —</span>
-      <span class="pill" id="updatedPill">Updated: —</span>
+      <span class="pill" id="lastDataPill">Last data: —</span>
       <span class="pill" id="modePill">Z: σ anomaly</span>
     </div>
+
+    <!-- stale / error banners -->
+    <div class="banner warn" id="bannerStale"></div>
+    <div class="banner error" id="bannerError"></div>
 
     <!-- controls -->
     <div class="btn-row">
@@ -106,7 +128,7 @@
       <span>−1.5σ</span>
       <div class="legend-grad"></div>
       <span>+1.5σ</span>
-      <span style="margin-left:8px">Blue = easterly anomaly (−AAM) · Red = westerly anomaly (+AAM)</span>
+      <span style="margin-left:8px">Blue = easterly anomaly (−AAM) · Yellow/Orange/Red = westerly anomaly (+AAM)</span>
     </div>
 
     <!-- contour-only legend -->
@@ -133,19 +155,22 @@
 </div>
 <script>
 // ── config ──────────────────────────────────────────────────────────────
-const DATA_URL = "./data/aam_lat_latest.txt";
-const ZRANGE   = 1.5;  // ±σ clip for color scale
+const DATA_URL        = "./data/aam_lat_latest.txt";
+const ZRANGE          = 1.5;      // ±σ clip for color scale
+const STALE_WARN_DAYS = 3;        // show warning banner after this many days
+const STALE_ERR_DAYS  = 14;       // escalate to error banner after this many days
 
 const COLORSCALE = [
-  [0.00, "#053061"],
-  [0.17, "#2166ac"],
-  [0.33, "#4393c3"],
-  [0.42, "#d1e5f0"],
-  [0.50, "#f7f7f7"],
-  [0.58, "#fddbc7"],
-  [0.67, "#d6604d"],
-  [0.83, "#b2182b"],
-  [1.00, "#67001f"]
+  [0.00, "#08306b"],   // deep navy  (−1.5σ, strong easterly)
+  [0.15, "#2171b5"],   // blue
+  [0.35, "#6baed6"],   // steel blue
+  [0.48, "#c6dbef"],   // pale blue-white
+  [0.50, "#f7f7f7"],   // white (zero)
+  [0.52, "#fff5cc"],   // cream
+  [0.65, "#ffcc00"],   // yellow
+  [0.78, "#ff8c00"],   // orange
+  [0.88, "#e03000"],   // orange-red
+  [1.00, "#7f0000"]    // deep red  (+1.5σ, strong westerly)
 ];
 
 // ── state ───────────────────────────────────────────────────────────────
@@ -158,12 +183,36 @@ const S = {
 const statusEl       = document.getElementById("status");
 const rowsPill       = document.getElementById("rowsPill");
 const latsPill       = document.getElementById("latsPill");
-const updatedPill    = document.getElementById("updatedPill");
+const lastDataPill   = document.getElementById("lastDataPill");
 const modePill       = document.getElementById("modePill");
 const legendShading  = document.getElementById("legendShading");
 const legendContours = document.getElementById("legendContours");
+const bannerStale    = document.getElementById("bannerStale");
+const bannerError    = document.getElementById("bannerError");
 
 function setStatus(msg) { statusEl.textContent = msg; }
+
+// ── stale check ──────────────────────────────────────────────────────────
+function checkStaleness(lastDate) {
+  const daysSince = Math.floor((Date.now() - lastDate.getTime()) / 86400000);
+  const lastStr   = lastDate.toISOString().slice(0, 10);
+
+  if (daysSince >= STALE_ERR_DAYS) {
+    bannerError.textContent =
+      `⛔ Data is significantly out of date — last observation: ${lastStr} (${daysSince} days ago). ` +
+      `Check GitHub Actions → Update Relative AAM → Run workflow. ` +
+      `The upstream AER / NCEP source file may also have stopped updating.`;
+    bannerError.classList.add("show");
+  } else if (daysSince >= STALE_WARN_DAYS) {
+    bannerStale.textContent =
+      `⚠️ Data may be stale — last observation: ${lastStr} (${daysSince} days ago). ` +
+      `Trigger the GitHub Action to refresh.`;
+    bannerStale.classList.add("show");
+  } else {
+    bannerStale.classList.remove("show");
+    bannerError.classList.remove("show");
+  }
+}
 
 // ── parse ────────────────────────────────────────────────────────────────
 function parseDate(tok) {
@@ -227,6 +276,7 @@ function heatmapTrace(x, z) {
       tickvals: [-1.5, -1, -0.5, 0, 0.5, 1, 1.5],
       thickness: 14, len: 0.85
     },
+    zsmooth: "best",   // bilinear interpolation — removes pixel grid appearance
     hovertemplate: "Date: %{x}<br>Lat: %{y:.2f}°<br>σ: %{z:.2f}<extra></extra>"
   };
 }
@@ -248,7 +298,6 @@ function contourOverlayTrace(x, z) {
 }
 
 function contoursOnlyTraces(x, z) {
-  // Split into positive and negative so we can use different dash styles
   const zPos = z.map(row => row.map(v => (v > 0  ? v : null)));
   const zNeg = z.map(row => row.map(v => (v < 0  ? v : null)));
 
@@ -377,12 +426,17 @@ async function main() {
 
     S.lats = lats; S.dates = dates; S.anom = anom;
 
+    const first   = dates[0].toISOString().slice(0, 10);
+    const last    = dates[dates.length - 1].toISOString().slice(0, 10);
+    const lastDate = dates[dates.length - 1];
+
     latsPill.textContent    = `Lats: ${lats.length} (${lats[0].toFixed(1)}° → ${lats[lats.length-1].toFixed(1)}°)`;
     rowsPill.textContent    = `Rows: ${dates.length}`;
-    updatedPill.textContent = `Updated: ${new Date().toUTCString()}`;
+    lastDataPill.textContent = `Last data: ${last}`;   // reflects actual data, not page-load time
 
-    const first = dates[0].toISOString().slice(0,10);
-    const last  = dates[dates.length-1].toISOString().slice(0,10);
+    // ── staleness check ──
+    checkStaleness(lastDate);
+
     setStatus(
       `${dates.length} days × ${lats.length} latitude bands.  Period: ${first} → ${last}\n` +
       `Anomalies are standardised σ departures from the 1980–2010 climatology.\n` +
