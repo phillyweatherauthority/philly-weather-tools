@@ -404,15 +404,17 @@ function plot() {
     modePill.textContent = "Contours every 0.25σ/d  |  Solid = + · Dashed = −";
   }
 
-  // always add global tendency panel
-  traces = [...traces, ...globalTendTrace(gx, gTend)];
+  // global tendency panel — only if data available
+  if (gDates.length && gTend.length) {
+    traces = [...traces, ...globalTendTrace(gx, gTend)];
+  }
 
   // GEFS forecast — Hovmöller extension
   const today = new Date().toISOString().slice(0, 10);
-  if (S.fcstDates.length) {
+  if (S.fcstDates.length && S.fcstTend.length && S.fcstTendStd.length) {
     const fx      = S.fcstDates.map(d => d.toISOString().slice(0,10));
-    const fTendZ  = buildZ(fx.map(d => new Date(d)), S.fcstTend);
-    const fStdZ   = buildZ(fx.map(d => new Date(d)), S.fcstTendStd);
+    const fTendZ  = buildZ(S.fcstDates, S.fcstTend);
+    const fStdZ   = buildZ(S.fcstDates, S.fcstTendStd);
     // Spread shading
     traces.push({
       type:"heatmap", x:fx, y:S.lats, z:fStdZ,
@@ -512,13 +514,16 @@ async function main() {
       fetch(FCST_GTEND_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
     if (!tRes.ok) throw new Error(`Tendency file: HTTP ${tRes.status}`);
-    if (!gRes.ok) throw new Error(`Global tendency file: HTTP ${gRes.status}`);
+    // global tendency is optional — page works without it
 
     const { lats, dates, tend }   = parseTendFile(await tRes.text());
-    const { dates: gDates, vals } = parseGlobalFile(await gRes.text());
+    let gDates = [], vals = [];
+    if (gRes && gRes.ok) {
+      const parsed = parseGlobalFile(await gRes.text());
+      gDates = parsed.dates; vals = parsed.vals;
+    }
 
     if (!lats?.length || !dates.length) { setStatus("Could not parse tendency data."); return; }
-    if (!gDates.length)                 { setStatus("Could not parse global tendency data."); return; }
 
     // Load GEFS tendency forecast if available
     if (ftRes && ftRes.ok && ftSRes && ftSRes.ok) {
