@@ -52,9 +52,10 @@ GRID         = [2.5, 2.5]
 
 REPO_ROOT  = Path(__file__).resolve().parent.parent
 DATA_DIR   = REPO_ROOT / "data"
-OUTPUT_TXT    = DATA_DIR / "aam_lat_latest.txt"
-TENDENCY_TXT  = DATA_DIR / "aam_tendency_latest.txt"
-CLIMO_NPZ     = DATA_DIR / "aam_climo.npz"
+OUTPUT_TXT         = DATA_DIR / "aam_lat_latest.txt"
+TENDENCY_TXT       = DATA_DIR / "aam_tendency_latest.txt"
+GLOBAL_TEND_TXT    = DATA_DIR / "aam_global_tendency_latest.txt"
+CLIMO_NPZ          = DATA_DIR / "aam_climo.npz"
 
 
 # ── auth ──────────────────────────────────────────────────────────────────────
@@ -461,6 +462,40 @@ def write_tendency(dates: list[date], lats: np.ndarray, tend: np.ndarray) -> Non
     log(f"Wrote {len(dates)} tendency rows → {TENDENCY_TXT}")
 
 
+# ── global tendency ──────────────────────────────────────────────────────────
+def compute_global_tendency(
+    dates: list[date], lats: np.ndarray, tend: np.ndarray
+) -> tuple[list[date], np.ndarray]:
+    """
+    Integrate tendency across all latitudes weighted by cos²φ·Δφ to get
+    a single global tendency time series (σ/day).
+    Matches the "GLOBAL TEND" panel on the AER/COREe diagnostic plots.
+    """
+    lats_rad = np.deg2rad(lats)
+    cos2     = np.cos(lats_rad) ** 2          # (nlat,)
+    dlat     = np.abs(np.gradient(lats_rad))  # (nlat,) — uniform at 2.5°
+    weights  = cos2 * dlat                    # (nlat,)
+    weights /= weights.sum()                  # normalise so sum = 1
+
+    global_tend = tend @ weights              # (ndays,)
+    return dates, global_tend
+
+
+def write_global_tendency(dates: list[date], global_tend: np.ndarray) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Global relative AAM tendency — ERA5 reanalysis",
+        "# Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels",
+        f"# Climatology base: {CLIMO_START}–{CLIMO_END}",
+        "# Units: cos²φ-weighted mean sigma/day across all latitudes",
+        f"# Generated: {date.today().isoformat()}",
+    ]
+    for d, v in zip(dates, global_tend):
+        lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {v:10.6f}")
+    GLOBAL_TEND_TXT.write_text("\n".join(lines) + "\n")
+    log(f"Wrote {len(dates)} global tendency rows → {GLOBAL_TEND_TXT}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -505,6 +540,10 @@ def main() -> None:
     log("Computing AAM tendency …")
     tend_dates, tend = compute_tendency(dates, anom)
     write_tendency(tend_dates, lats, tend)
+
+    log("Computing global tendency …")
+    gtend_dates, global_tend = compute_global_tendency(tend_dates, lats, tend)
+    write_global_tendency(gtend_dates, global_tend)
 
     log("Done.")
 
