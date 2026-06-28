@@ -47,6 +47,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/aam_lat_latest.txt
           git add data/aam_tendency_latest.txt 2>/dev/null || true
+          git add data/aam_global_tendency_latest.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
