@@ -1,3 +1,4 @@
-cdsapi
-netCDF4
+requests
 numpy
+cfgrib
+eccodes
