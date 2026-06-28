@@ -278,7 +278,8 @@ function makeLayout(days) {
       title: "σ/day", domain: [0.0, 0.27],
       zeroline: true, zerolinewidth: 1.5, zerolinecolor: "#555",
       showgrid: true, gridcolor: "rgba(160,160,160,0.2)",
-      tickfont: { size: 10 }
+      tickfont: { size: 10 },
+      autorange: true
     },
 
     // panel labels
@@ -349,7 +350,6 @@ function contoursOnlyTraces(x, z) {
 }
 
 function globalTendTrace(gx, gy) {
-  // filled area above/below zero for visual clarity
   const posY = gy.map(v => v > 0 ? v : 0);
   const negY = gy.map(v => v < 0 ? v : 0);
   return [
@@ -472,9 +472,9 @@ function plot() {
       xaxis:"x2", yaxis:"y2", showlegend:false,
       hovertemplate:"Fcst tendency: %{x}<br>%{y:.3f}σ/d<extra></extra>"
     });
-    // Today line on global panel
+    // Today line on global panel — y extent matches data scale, not ±4
     traces.push({
-      type:"scatter", x:[today,today], y:[-4,4],
+      type:"scatter", x:[today,today], y:[-0.5,0.5],
       mode:"lines", line:{color:"#111827",width:2,dash:"dash"},
       xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false
     });
@@ -514,7 +514,6 @@ async function main() {
       fetch(FCST_GTEND_URL    + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
     if (!tRes.ok) throw new Error(`Tendency file: HTTP ${tRes.status}`);
-    // global tendency is optional — page works without it
 
     const { lats, dates, tend }   = parseTendFile(await tRes.text());
     let gDates = [], vals = [];
@@ -547,8 +546,8 @@ async function main() {
     const first = dates[0].toISOString().slice(0, 10);
     const last  = dates[dates.length - 1].toISOString().slice(0, 10);
 
-    latsPill.textContent    = `Lats: ${lats.length}`;
-    rowsPill.textContent    = `Rows: ${dates.length}`;
+    latsPill.textContent     = `Lats: ${lats.length}`;
+    rowsPill.textContent     = `Rows: ${dates.length}`;
     lastDataPill.textContent = `Last data: ${last}`;
 
     checkStaleness(dates[dates.length - 1]);
