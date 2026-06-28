@@ -64,9 +64,9 @@
     .btn.active { background: #111827; color: #fff; border-color: #111827; }
     .btn-divider { width: 1px; height: 24px; background: #e0e0e0; margin: 0 4px; }
 
-    #chart { height: 420px; }
-    @media (min-width: 600px) { #chart { height: 600px; } }
-    @media (min-width: 900px) { #chart { height: 700px; } }
+    #chart { height: 560px; }
+    @media (min-width: 600px) { #chart { height: 720px; } }
+    @media (min-width: 900px) { #chart { height: 860px; } }
     .status {
       font-size: 12px; color: var(--muted); white-space: pre-wrap;
       line-height: 1.35; margin-top: 10px;
@@ -175,6 +175,8 @@ const STALE_WARN_DAYS = 3;        // show warning banner after this many days
 const STALE_ERR_DAYS  = 14;       // escalate to error banner after this many days
 const FCST_MEAN_URL   = "./data/aam_fcst_mean_latest.txt";
 const FCST_STD_URL    = "./data/aam_fcst_std_latest.txt";
+const FCST_GLOBAL_URL = "./data/aam_fcst_global_latest.txt";
+const OBS_GLOBAL_URL  = "./data/aam_global_latest.txt";
 
 const COLORSCALE = [
   [0.00, "#08306b"],   // deep navy  (−1.5σ, strong easterly)
@@ -193,6 +195,8 @@ const COLORSCALE = [
 const S = {
   dates: [], lats: [], anom: [],
   fcstDates: [], fcstMean: [], fcstStd: [],
+  fcstGDates: [], fcstGlobal: [], fcstGStd: [],
+  obsDates: [], obsGlobal: [],
   rangeDays: "60", dispMode: "both"
 };
 
@@ -332,6 +336,7 @@ function heatmapTrace(x, z) {
       x: 1.01, xanchor: "left",
     },
     zsmooth: "best",   // bilinear interpolation — removes pixel grid appearance
+    xaxis: "x", yaxis: "y",
     hovertemplate: "Date: %{x}<br>Lat: %{y:.2f}°<br>σ: %{z:.2f}<extra></extra>"
   };
 }
@@ -348,6 +353,7 @@ function contourOverlayTrace(x, z) {
       coloring: "none"
     },
     line: { width: 1, color: "#222" },
+    xaxis: "x", yaxis: "y",
     hoverinfo: "skip"
   };
 }
@@ -372,13 +378,15 @@ function contoursOnlyTraces(x, z) {
     ...base, z: zPos,
     name: "Westerly (+)",
     contours: { ...base.contours, start: 0.5, end: 4, size: 0.5 },
-    line: { width: 1.5, color: "#111", dash: "solid" }
+    line: { width: 1.5, color: "#111", dash: "solid" },
+    xaxis: "x", yaxis: "y"
   };
   const negTrace = {
     ...base, z: zNeg,
     name: "Easterly (−)",
     contours: { ...base.contours, start: -4, end: -0.5, size: 0.5 },
-    line: { width: 1.5, color: "#444", dash: "dash" }
+    line: { width: 1.5, color: "#444", dash: "dash" },
+    xaxis: "x", yaxis: "y"
   };
   return [posTrace, negTrace];
 }
@@ -412,6 +420,24 @@ function fcstMeanTrace(x, z) {
   };
 }
 
+function fcstContourTrace(x, z) {
+  // Contour overlay for forecast period — dashed to distinguish from observed
+  return {
+    type: "contour", x, y: S.lats, z,
+    showscale: false,
+    colorscale: [[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
+    contours: {
+      start: -4, end: 4, size: 0.5,
+      showlabels: true,
+      labelfont: { size: 8, color: "#333" },
+      coloring: "none"
+    },
+    line: { width: 1, color: "#444", dash: "dot" },
+    xaxis: "x", yaxis: "y",
+    hoverinfo: "skip"
+  };
+}
+
 function fcstSpreadTrace(x, zStd) {
   const SPREAD_CS = [
     [0.0, "rgba(200,200,200,0.0)"],
@@ -424,6 +450,7 @@ function fcstSpreadTrace(x, zStd) {
     colorscale: SPREAD_CS,
     zsmooth: "best",
     showscale: false,
+    xaxis: "x", yaxis: "y",
     hovertemplate: "Spread \u00b11\u03c3: %{z:.2f}<extra></extra>"
   };
 }
@@ -435,6 +462,21 @@ function todayLine(todayStr) {
     y: [S.lats[0], S.lats[S.lats.length - 1]],
     mode: "lines",
     line: { color: "#111827", width: 2, dash: "dash" },
+    xaxis: "x", yaxis: "y",
+    hoverinfo: "skip",
+    showlegend: false
+  };
+}
+
+function todayLine2(todayStr) {
+  // Today line for global panel
+  return {
+    type: "scatter",
+    x: [todayStr, todayStr],
+    y: [-4, 4],
+    mode: "lines",
+    line: { color: "#111827", width: 2, dash: "dash" },
+    xaxis: "x2", yaxis: "y2",
     hoverinfo: "skip",
     showlegend: false
   };
@@ -454,28 +496,43 @@ function todayAnnotation(todayStr) {
 
 function makeLayout() {
   const days = Number(S.rangeDays);
-  const dtick = days <= 14 ? 86400000      // daily
-              : days <= 60 ? 7 * 86400000  // weekly
-              : 14 * 86400000;             // fortnightly for 90d+
+  const dtick = days <= 14 ? 86400000
+              : days <= 60 ? 7 * 86400000
+              : 14 * 86400000;
+  const xAxisCfg = {
+    type: "date", dtick, tickformat: "%b %d",
+    tickangle: -40,
+    showgrid: true, gridcolor: "rgba(180,180,180,0.18)",
+    zeroline: false
+  };
   return {
-    xaxis: {
-      title: "", type: "date",
-      dtick, tickformat: "%b %d",
-      tickangle: -40,
-      showgrid: true, gridcolor: "rgba(180,180,180,0.18)",
-      zeroline: false,
-    },
+    grid: { rows: 2, columns: 1, pattern: "independent", roworder: "top to bottom" },
+    xaxis:  { ...xAxisCfg },
+    xaxis2: { ...xAxisCfg },
     yaxis: {
-      title: "Latitude",
+      title: "Latitude", domain: [0.32, 1.0],
       zeroline: true, zerolinewidth: 1.5, zerolinecolor: "#888",
       showgrid: true, gridcolor: "rgba(160,160,160,0.25)",
       tickvals: [-90,-60,-30,0,30,60,90],
       ticktext: ["90°S","60°S","30°S","EQ","30°N","60°N","90°N"]
     },
+    yaxis2: {
+      title: "σ", domain: [0.0, 0.27],
+      zeroline: true, zerolinewidth: 1.5, zerolinecolor: "#555",
+      showgrid: true, gridcolor: "rgba(160,160,160,0.2)",
+      tickfont: { size: 10 }
+    },
+    annotations: [
+      { text: "HOVMÖLLER", xref: "paper", yref: "paper",
+        x: 0.01, y: 1.0, xanchor: "left", yanchor: "top",
+        showarrow: false, font: { size: 10, color: "#888" } },
+      { text: "GLOBAL AAM", xref: "paper", yref: "paper",
+        x: 0.01, y: 0.27, xanchor: "left", yanchor: "top",
+        showarrow: false, font: { size: 10, color: "#888" } }
+    ],
     margin: { l: 52, r: 10, t: 6, b: 60 },
     paper_bgcolor: "#fff", plot_bgcolor: "#fff",
-    showlegend: false,
-    annotations: []
+    showlegend: false
   };
 }
 
@@ -518,13 +575,53 @@ function plot() {
       traces.push(fcstSpreadTrace(fx, fStdZ));
       traces.push(fcstMeanTrace(fx, fMeanZ));
     }
+    if (mode === "both" || mode === "contours") {
+      traces.push(fcstContourTrace(fx, fMeanZ));
+    }
     traces.push(todayLine(today));
   }
 
+  // ── Global AAM panel ──
+  const today2 = new Date().toISOString().slice(0, 10);
+  // Observed global AAM
+  if (S.obsGlobal.length) {
+    const ox = S.obsDates
+      .filter(d => d.getTime() >= (new Date(fd[0]).getTime()))
+      .map(d => d.toISOString().slice(0,10));
+    const oy = S.obsGlobal.slice(S.obsGlobal.length - ox.length);
+    const posY = oy.map(v => v > 0 ? v : 0);
+    const negY = oy.map(v => v < 0 ? v : 0);
+    traces.push({ type:"scatter", x:ox, y:posY, fill:"tozeroy",
+      fillcolor:"rgba(224,48,0,0.2)", line:{width:0},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false });
+    traces.push({ type:"scatter", x:ox, y:negY, fill:"tozeroy",
+      fillcolor:"rgba(33,113,181,0.2)", line:{width:0},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false });
+    traces.push({ type:"scatter", x:ox, y:oy, mode:"lines",
+      line:{color:"#111827", width:1.8},
+      xaxis:"x2", yaxis:"y2", showlegend:false,
+      hovertemplate:"Date: %{x}<br>Global AAM: %{y:.3f}σ<extra></extra>" });
+  }
+  // Forecast global AAM
+  if (S.fcstGDates.length) {
+    const gx   = S.fcstGDates.map(d => d.toISOString().slice(0,10));
+    const gMean = S.fcstGlobal;
+    const gStd  = S.fcstGStd;
+    const gUp   = gMean.map((v,i) => v + gStd[i]);
+    const gDn   = gMean.map((v,i) => v - gStd[i]);
+    traces.push({ type:"scatter", x:[...gx,...gx.slice().reverse()],
+      y:[...gUp,...gDn.slice().reverse()], fill:"toself",
+      fillcolor:"rgba(100,100,100,0.15)", line:{width:0},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false });
+    traces.push({ type:"scatter", x:gx, y:gMean, mode:"lines",
+      line:{color:"#555", width:1.5, dash:"dash"},
+      xaxis:"x2", yaxis:"y2", showlegend:false,
+      hovertemplate:"Fcst: %{x}<br>Ensemble mean: %{y:.3f}σ<extra></extra>" });
+    traces.push(todayLine2(today2));
+  }
+
   const layout = makeLayout();
-  // Add "FCST →" annotation if forecast data present
   if (S.fcstDates.length) {
-    layout.annotations = layout.annotations || [];
     layout.annotations.push(todayAnnotation(today));
   }
 
@@ -556,10 +653,12 @@ async function main() {
   setStatus("Loading AAM data…");
   try {
     // Fetch observed ERA5 data + forecast files in parallel
-    const [obsResp, fcstMeanResp, fcstStdResp] = await Promise.all([
-      fetch(DATA_URL       + "?_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(FCST_MEAN_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
-      fetch(FCST_STD_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+    const [obsResp, fcstMeanResp, fcstStdResp, obsGlobResp, fcstGlobResp] = await Promise.all([
+      fetch(DATA_URL        + "?_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(FCST_MEAN_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_STD_URL    + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(OBS_GLOBAL_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_GLOBAL_URL + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
 
     if (!obsResp.ok) throw new Error(`HTTP ${obsResp.status}`);
@@ -575,6 +674,23 @@ async function main() {
       log(`Forecast: ${fDates.length} days loaded`);
     } else {
       log("Forecast files not yet available — showing observed only");
+    }
+
+    // Observed global AAM
+    if (obsGlobResp && obsGlobResp.ok) {
+      const txt = await obsGlobResp.text();
+      const lines = txt.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+      S.obsDates  = lines.map(l => parseDate(l.trim().split(/\s+/)[0])).filter(Boolean);
+      S.obsGlobal = lines.map(l => Number(l.trim().split(/\s+/)[1]));
+    }
+
+    // Forecast global AAM
+    if (fcstGlobResp && fcstGlobResp.ok) {
+      const txt = await fcstGlobResp.text();
+      const lines = txt.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+      S.fcstGDates  = lines.map(l => parseDate(l.trim().split(/\s+/)[0])).filter(Boolean);
+      S.fcstGlobal  = lines.map(l => Number(l.trim().split(/\s+/)[1]));
+      S.fcstGStd    = lines.map(l => Number(l.trim().split(/\s+/)[2]));
     }
 
     if (!lats?.length) {
