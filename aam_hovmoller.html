@@ -173,6 +173,8 @@ const DATA_URL        = "./data/aam_lat_latest.txt";
 const ZRANGE          = 1.5;      // ±σ clip for color scale
 const STALE_WARN_DAYS = 3;        // show warning banner after this many days
 const STALE_ERR_DAYS  = 14;       // escalate to error banner after this many days
+const FCST_MEAN_URL   = "./data/aam_fcst_mean_latest.txt";
+const FCST_STD_URL    = "./data/aam_fcst_std_latest.txt";
 
 const COLORSCALE = [
   [0.00, "#08306b"],   // deep navy  (−1.5σ, strong easterly)
@@ -190,6 +192,7 @@ const COLORSCALE = [
 // ── state ───────────────────────────────────────────────────────────────
 const S = {
   dates: [], lats: [], anom: [],
+  fcstDates: [], fcstMean: [], fcstStd: [],
   rangeDays: "60", dispMode: "both"
 };
 
@@ -205,6 +208,7 @@ const bannerStale    = document.getElementById("bannerStale");
 const bannerError    = document.getElementById("bannerError");
 
 function setStatus(msg) { statusEl.textContent = msg; }
+function log(msg) { console.log(msg); }
 
 // ── stale check ──────────────────────────────────────────────────────────
 function checkStaleness(lastDate) {
@@ -254,6 +258,29 @@ function parseFile(text) {
     anom.push(parts.slice(1).map(Number));
   }
   return { lats, dates, anom };
+}
+
+// ── forecast parser ─────────────────────────────────────────────────────────
+function parseFcstFile(text) {
+  const lines = text.split(/\r?\n/);
+  let lats = null;
+  const dates = [], rows = [];
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    if (s.startsWith("#")) {
+      const m = s.match(/^#\s*Lats:\s*(.+)$/);
+      if (m) lats = m[1].trim().split(/\s+/).map(Number);
+      continue;
+    }
+    const parts = s.split(/\s+/);
+    if (parts.length < 2) continue;
+    const dt = parseDate(parts[0]);
+    if (!dt) continue;
+    dates.push(dt);
+    rows.push(parts.slice(1).map(Number));
+  }
+  return { lats, dates, rows };
 }
 
 // ── filter ───────────────────────────────────────────────────────────────
@@ -357,6 +384,74 @@ function contoursOnlyTraces(x, z) {
 }
 
 // ── layout ────────────────────────────────────────────────────────────────
+// ── forecast traces ──────────────────────────────────────────────────────────
+function buildFcstZ(fa) {
+  const nlat = S.lats.length, ndays = fa.length;
+  const TAPER = 4;
+  const z = [];
+  for (let li = 0; li < nlat; li++) {
+    const dist   = Math.min(li, nlat - 1 - li);
+    const weight = dist >= TAPER ? 1.0 : 0.5 * (1 - Math.cos(Math.PI * dist / TAPER));
+    const row    = new Array(ndays);
+    for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li] * weight;
+    z.push(row);
+  }
+  return z;
+}
+
+function fcstMeanTrace(x, z) {
+  // Slightly faded version of same colorscale
+  const zFaded = z.map(row => row.map(v => v * 0.75));
+  return {
+    type: "heatmap", x, y: S.lats, z: zFaded,
+    zmin: -ZRANGE, zmax: ZRANGE,
+    colorscale: COLORSCALE,
+    zsmooth: "best",
+    showscale: false,
+    hovertemplate: "Fcst: %{x}<br>Lat: %{y:.2f}\u00b0<br>Ensemble mean: %{z:.2f}\u03c3<extra></extra>"
+  };
+}
+
+function fcstSpreadTrace(x, zStd) {
+  const SPREAD_CS = [
+    [0.0, "rgba(200,200,200,0.0)"],
+    [0.5, "rgba(130,130,130,0.2)"],
+    [1.0, "rgba(80,80,80,0.42)"]
+  ];
+  return {
+    type: "heatmap", x, y: S.lats, z: zStd,
+    zmin: 0, zmax: 1.5,
+    colorscale: SPREAD_CS,
+    zsmooth: "best",
+    showscale: false,
+    hovertemplate: "Spread \u00b11\u03c3: %{z:.2f}<extra></extra>"
+  };
+}
+
+function todayLine(todayStr) {
+  return {
+    type: "scatter",
+    x: [todayStr, todayStr],
+    y: [S.lats[0], S.lats[S.lats.length - 1]],
+    mode: "lines",
+    line: { color: "#111827", width: 2, dash: "dash" },
+    hoverinfo: "skip",
+    showlegend: false
+  };
+}
+
+function todayAnnotation(todayStr) {
+  return {
+    x: todayStr, y: 1.0,
+    xref: "x", yref: "paper",
+    text: "FCST →",
+    showarrow: false,
+    xanchor: "left",
+    font: { size: 10, color: "#555" },
+    yanchor: "bottom"
+  };
+}
+
 function makeLayout() {
   const days = Number(S.rangeDays);
   const dtick = days <= 14 ? 86400000      // daily
@@ -379,7 +474,8 @@ function makeLayout() {
     },
     margin: { l: 52, r: 10, t: 6, b: 60 },
     paper_bgcolor: "#fff", plot_bgcolor: "#fff",
-    showlegend: false
+    showlegend: false,
+    annotations: []
   };
 }
 
@@ -412,8 +508,28 @@ function plot() {
     modePill.textContent = "Contours every 0.5σ  |  Solid = + · Dashed = −";
   }
 
-  Plotly.newPlot("chart", traces, makeLayout(), { responsive: true, displayModeBar: false });
-  rowsPill.textContent = `Rows: ${fd.length}`;
+  // Append forecast traces if data is available
+  const today = new Date().toISOString().slice(0, 10);
+  if (S.fcstDates.length) {
+    const fx = S.fcstDates.map(d => d.toISOString().slice(0, 10));
+    const fMeanZ = buildFcstZ(S.fcstMean);
+    const fStdZ  = buildFcstZ(S.fcstStd);
+    if (mode !== "contours") {
+      traces.push(fcstSpreadTrace(fx, fStdZ));
+      traces.push(fcstMeanTrace(fx, fMeanZ));
+    }
+    traces.push(todayLine(today));
+  }
+
+  const layout = makeLayout();
+  // Add "FCST →" annotation if forecast data present
+  if (S.fcstDates.length) {
+    layout.annotations = layout.annotations || [];
+    layout.annotations.push(todayAnnotation(today));
+  }
+
+  Plotly.newPlot("chart", traces, layout, { responsive: true, displayModeBar: false });
+  rowsPill.textContent = `Rows: ${fd.length}${S.fcstDates.length ? " + " + S.fcstDates.length + "d fcst" : ""}`;
 }
 
 // ── button wiring ─────────────────────────────────────────────────────────
@@ -437,11 +553,29 @@ document.querySelectorAll("[data-range]").forEach(btn => {
 
 // ── fetch & boot ──────────────────────────────────────────────────────────
 async function main() {
-  setStatus("Loading latitude-resolved AAM data…");
+  setStatus("Loading AAM data…");
   try {
-    const r = await fetch(DATA_URL + "?_ts=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const { lats, dates, anom } = parseFile(await r.text());
+    // Fetch observed ERA5 data + forecast files in parallel
+    const [obsResp, fcstMeanResp, fcstStdResp] = await Promise.all([
+      fetch(DATA_URL       + "?_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(FCST_MEAN_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_STD_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+    ]);
+
+    if (!obsResp.ok) throw new Error(`HTTP ${obsResp.status}`);
+    const { lats, dates, anom } = parseFile(await obsResp.text());
+
+    // Load forecast if available (gracefully skip if not yet generated)
+    if (fcstMeanResp && fcstMeanResp.ok && fcstStdResp && fcstStdResp.ok) {
+      const { dates: fDates, rows: fMean } = parseFcstFile(await fcstMeanResp.text());
+      const { rows: fStd }                 = parseFcstFile(await fcstStdResp.text());
+      S.fcstDates = fDates;
+      S.fcstMean  = fMean;
+      S.fcstStd   = fStd;
+      log(`Forecast: ${fDates.length} days loaded`);
+    } else {
+      log("Forecast files not yet available — showing observed only");
+    }
 
     if (!lats?.length) {
       setStatus(
