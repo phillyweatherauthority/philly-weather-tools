@@ -343,14 +343,12 @@ def main() -> None:
         print("ERROR: no forecast data retrieved.", file=sys.stderr)
         sys.exit(1)
 
-    # Verify lat grid matches climatology
-    if not np.allclose(climo_lats, lats_ref, atol=0.1):
-        # interpolate if grids differ slightly
-        log("WARNING: lat grid mismatch — interpolating to climo grid")
-        lats_ref_new = climo_lats
-        for fxx in FCST_HOURS:
-            all_aam[fxx] = [np.interp(climo_lats, lats_ref, a) for a in all_aam[fxx]]
-        lats_ref = lats_ref_new
+    # GEFS is 0.5° (361 lats), climatology is 2.5° (73 lats) — always interpolate
+    log(f"Interpolating GEFS grid ({len(lats_ref)} lats) to climo grid ({len(climo_lats)} lats) …")
+    for fxx in FCST_HOURS:
+        all_aam[fxx] = [np.interp(climo_lats, lats_ref[::-1], a[::-1])
+                        for a in all_aam[fxx]]
+    lats_ref = climo_lats
 
     # Compute ensemble mean and std, convert to σ anomalies
     fcst_dates  = []
