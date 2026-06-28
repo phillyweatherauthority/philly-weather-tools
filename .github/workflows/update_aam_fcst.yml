@@ -1,0 +1,59 @@
+name: Update AAM Forecast (GEFS)
+
+on:
+  schedule:
+    # Run once daily at 06:00 UTC — 6hr after 00Z GEFS init,
+    # enough time for all forecast hours including f168 to be available
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-gefs-aam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45    # 31 members × 7 days × byte-range fetch
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies (eccodes for GRIB2)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libeccodes-dev libeccodes-tools
+
+      - name: Cache pip packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-gefs-${{ hashFiles('**/requirements_aam_fcst.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-gefs-
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_aam_fcst.txt
+
+      - name: Fetch GEFS and compute AAM forecast anomalies
+        run: python scripts/fetch_gfs_aam.py
+
+      - name: Commit and push forecast data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/aam_fcst_mean_latest.txt 2>/dev/null || true
+          git add data/aam_fcst_std_latest.txt  2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update GEFS AAM forecast [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git push
+          fi
