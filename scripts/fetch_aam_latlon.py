@@ -52,8 +52,9 @@ GRID         = [2.5, 2.5]
 
 REPO_ROOT  = Path(__file__).resolve().parent.parent
 DATA_DIR   = REPO_ROOT / "data"
-OUTPUT_TXT = DATA_DIR / "aam_lat_latest.txt"
-CLIMO_NPZ  = DATA_DIR / "aam_climo.npz"
+OUTPUT_TXT    = DATA_DIR / "aam_lat_latest.txt"
+TENDENCY_TXT  = DATA_DIR / "aam_tendency_latest.txt"
+CLIMO_NPZ     = DATA_DIR / "aam_climo.npz"
 
 
 # ── auth ──────────────────────────────────────────────────────────────────────
@@ -340,7 +341,13 @@ def _finalise_climatology(lats, day_sum, day_sum2, day_count) -> None:
     std_raw    = np.sqrt(np.maximum(var_raw, 0.0))
     climo_mean = smooth_circular(mean_raw, SMOOTH_HALF)
     climo_std  = smooth_circular(std_raw,  SMOOTH_HALF)
-    climo_std  = np.where(climo_std > 0, climo_std, 1.0)
+    # Polar artifact fix: near 90N/90S, cos²φ → 0 so AAM → 0 and std is
+    # near-zero, causing division to blow up. Apply a latitude-weighted floor:
+    # minimum std = 2% of the global mean std across all latitudes.
+    # This preserves real polar signal while suppressing division artifacts.
+    global_mean_std = float(np.nanmean(climo_std))
+    std_floor       = 0.02 * global_mean_std
+    climo_std       = np.where(climo_std > std_floor, climo_std, std_floor)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -422,6 +429,38 @@ def write_output(dates: list[date], lats: np.ndarray, anom: np.ndarray) -> None:
     log(f"Wrote {len(dates)} rows → {OUTPUT_TXT}")
 
 
+# ── tendency output ──────────────────────────────────────────────────────────
+def compute_tendency(dates: list[date], anom: np.ndarray) -> tuple[list[date], np.ndarray]:
+    """
+    Compute day-to-day tendency of the standardised AAM anomaly field.
+    Tendency[i] = anom[i] - anom[i-1]  (centred on day i-0.5, assigned to day i).
+    Returns (tend_dates, tend) dropping the first day which has no predecessor.
+    Units: σ/day
+    """
+    tend       = np.diff(anom, axis=0)           # (ndays-1, nlat)
+    tend_dates = dates[1:]                        # aligned to the later day
+    # Clamp tendency — genuine values stay within ±2σ/day
+    tend = np.clip(tend, -2.0, 2.0)
+    return tend_dates, tend
+
+
+def write_tendency(dates: list[date], lats: np.ndarray, tend: np.ndarray) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Relative AAM tendency by latitude — ERA5 reanalysis",
+        "# Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels",
+        f"# Climatology base: {CLIMO_START}–{CLIMO_END}",
+        "# Units: sigma per day (day-to-day difference of standardised AAM anomaly)",
+        f"# Generated: {date.today().isoformat()}",
+        "# Lats: " + " ".join(f"{lat:.2f}" for lat in lats),
+    ]
+    for d, row in zip(dates, tend):
+        vals = " ".join(f"{v:8.4f}" for v in row)
+        lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
+    TENDENCY_TXT.write_text("\n".join(lines) + "\n")
+    log(f"Wrote {len(dates)} tendency rows → {TENDENCY_TXT}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -457,8 +496,16 @@ def main() -> None:
     for i, d in enumerate(dates):
         doy     = doy365(d) - 1
         anom[i] = (aam_recent[i] - climo_mean[doy]) / climo_std[doy]
+    # Clamp to ±4σ — genuine AAM anomalies never exceed this;
+    # values beyond it are polar grid artifacts from near-zero std
+    anom = np.clip(anom, -4.0, 4.0)
 
     write_output(dates, lats, anom)
+
+    log("Computing AAM tendency …")
+    tend_dates, tend = compute_tendency(dates, anom)
+    write_tendency(tend_dates, lats, tend)
+
     log("Done.")
 
 
