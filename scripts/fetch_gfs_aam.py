@@ -167,25 +167,22 @@ def extract_ugrd_from_grib(grib_bytes: bytes) -> tuple[np.ndarray, np.ndarray, n
         tmp = f.name
 
     try:
-        # Open all GRIB messages — may return multiple datasets if
-        # level types differ; filter to isobaricInhPa only
-        ds_list = xr.open_datasets(
-            tmp,
-            engine="cfgrib",
-            backend_kwargs={"indexpath": ""},
-        )
-        # Find dataset with u-wind on pressure levels
+        # cfgrib.open_datasets (plural) handles multiple GRIB message types
+        import cfgrib as _cfgrib
+        ds_list = _cfgrib.open_datasets(tmp, backend_kwargs={"indexpath": ""})
+        # Find the dataset containing u-wind on pressure levels
         ds = None
         for d in ds_list:
-            if "u" in d:
+            if "u" in d and "isobaricInhPa" in d.coords:
                 ds = d
                 break
         if ds is None:
-            # fallback: single dataset
+            # Last resort: open single dataset directly
             ds = xr.open_dataset(
                 tmp,
                 engine="cfgrib",
                 backend_kwargs={"indexpath": ""},
+                filter_by_keys={"typeOfLevel": "isobaricInhPa", "shortName": "u"},
             )
 
         u    = ds["u"].values
