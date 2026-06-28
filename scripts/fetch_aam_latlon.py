@@ -55,6 +55,7 @@ DATA_DIR   = REPO_ROOT / "data"
 OUTPUT_TXT         = DATA_DIR / "aam_lat_latest.txt"
 TENDENCY_TXT       = DATA_DIR / "aam_tendency_latest.txt"
 GLOBAL_TEND_TXT    = DATA_DIR / "aam_global_tendency_latest.txt"
+GLOBAL_AAM_TXT     = DATA_DIR / "aam_global_latest.txt"
 CLIMO_NPZ          = DATA_DIR / "aam_climo.npz"
 
 
@@ -536,6 +537,24 @@ def main() -> None:
     anom = np.clip(anom, -4.0, 4.0)
 
     write_output(dates, lats, anom)
+
+    # Global observed AAM (cos²φ-weighted)
+    lats_rad   = np.deg2rad(lats)
+    cos2_w     = np.cos(lats_rad) ** 2
+    dlat_w     = np.abs(np.gradient(lats_rad))
+    weights_g  = cos2_w * dlat_w
+    weights_g /= weights_g.sum()
+    global_aam = anom @ weights_g
+    g_lines    = [
+        "# Global relative AAM anomaly — ERA5 reanalysis",
+        "# Units: cos²φ-weighted mean sigma",
+        f"# Generated: {date.today().isoformat()}",
+        "# Cols: date  sigma",
+    ]
+    for d, v in zip(dates, global_aam):
+        g_lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {v:10.6f}")
+    GLOBAL_AAM_TXT.write_text("\n".join(g_lines) + "\n")
+    log(f"Wrote global AAM → {GLOBAL_AAM_TXT}")
 
     log("Computing AAM tendency …")
     tend_dates, tend = compute_tendency(dates, anom)
