@@ -507,11 +507,11 @@ async function main() {
   setStatus("Loading AAM tendency data…");
   try {
     const [tRes, gRes, ftRes, ftSRes, fgRes] = await Promise.all([
-      fetch(TEND_URL        + "?_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(GLOBAL_URL      + "?_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(FCST_TEND_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(TEND_URL          + "?_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(GLOBAL_URL        + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_TEND_URL     + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
       fetch(FCST_TEND_STD_URL + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
-      fetch(FCST_GTEND_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_GTEND_URL    + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
     if (!tRes.ok) throw new Error(`Tendency file: HTTP ${tRes.status}`);
     // global tendency is optional — page works without it
