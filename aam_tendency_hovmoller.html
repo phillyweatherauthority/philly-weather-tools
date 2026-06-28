@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Relative AAM Tendency by Latitude (Hovmöller) - PhillyWeatherAuthority</title>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4f6f8; --card: #fff; --border: #e6e6e6;
+      --text: #111827; --muted: #4b5563;
+      --pill-bg: #eef2ff; --pill-border: #dbe4ff; --pill-text: #1f2a66;
+      --warn-bg: #fff7ed; --warn-border: #fed7aa; --warn-text: #9a3412;
+      --err-bg: #fef2f2; --err-border: #fecaca; --err-text: #991b1b;
+    }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 0; padding: 10px; background: var(--bg); color: var(--text);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.04); margin-bottom: 10px;
+    }
+    h1 { font-size: 16px; margin: 0 0 8px; line-height: 1.3; }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .pill {
+      font-size: 12px; padding: 4px 10px; border-radius: 999px;
+      background: var(--pill-bg); border: 1px solid var(--pill-border);
+      color: var(--pill-text); white-space: nowrap;
+    }
+    .banner {
+      display: none; margin-top: 10px; padding: 8px 14px; border-radius: 10px;
+      font-size: 13px; line-height: 1.45; font-weight: 500;
+    }
+    .banner.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text); }
+    .banner.error { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-text); }
+    .banner.show { display: block; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+    .btn-label { font-size: 11px; color: var(--muted); margin-right: 2px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+    .btn { border: 1px solid #d0d0d0; background: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: background .12s, color .12s; }
+    .btn:hover { background: #f0f0f0; }
+    .btn.active { background: #111827; color: #fff; border-color: #111827; }
+    .btn-divider { width: 1px; height: 24px; background: #e0e0e0; margin: 0 4px; }
+    #chart { height: 420px; }
+    @media (min-width: 600px) { #chart { height: 580px; } }
+    @media (min-width: 900px) { #chart { height: 680px; } }
+    .status { font-size: 12px; color: var(--muted); white-space: pre-wrap; line-height: 1.35; margin-top: 10px; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 8px; }
+    .legend-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+    .legend-grad { width: 160px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1>RELATIVE AAM TENDENCY — LATITUDE × TIME (HOVMÖLLER)</h1>
+    <div class="bar">
+      <span class="pill">Source: <code>./data/aam_tendency_latest.txt</code></span>
+      <span class="pill">Dataset: ERA5</span>
+      <span class="pill">Base: 1980–2010</span>
+      <span class="pill" id="rowsPill">Rows: —</span>
+      <span class="pill" id="latsPill">Lats: —</span>
+      <span class="pill" id="lastDataPill">Last data: —</span>
+      <span class="pill" id="modePill">Z: σ/day</span>
+    </div>
+
+    <div class="banner warn" id="bannerStale"></div>
+    <div class="banner error" id="bannerError"></div>
+
+    <div class="btn-row">
+      <span class="btn-label">Display</span>
+      <button class="btn active" data-mode="both">Shading + Contours</button>
+      <button class="btn" data-mode="shading">Shading only</button>
+      <button class="btn" data-mode="contours">Contours only</button>
+      <div class="btn-divider"></div>
+      <span class="btn-label">Range</span>
+      <button class="btn active" data-range="60">60d</button>
+      <button class="btn" data-range="45">45d</button>
+      <button class="btn" data-range="30">30d</button>
+      <button class="btn" data-range="14">14d</button>
+    </div>
+
+    <div class="legend-row" id="legendShading">
+      <span>−1σ/d</span>
+      <div class="legend-grad" style="background: linear-gradient(to right, #08306b, #6baed6, #f7f7f7, #fd8d3c, #7f0000);"></div>
+      <span>+1σ/d</span>
+      <span style="margin-left:8px">Blue = decelerating (−tendency) · Orange/Red = accelerating (+tendency)</span>
+    </div>
+    <div class="legend-row" id="legendContours" style="display:none">
+      <span>Solid = acceleration (+) · Dashed = deceleration (−) · Contours every 0.25σ/day</span>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card" style="position:relative;">
+    <div id="chart"></div>
+    <div style="
+      position: absolute; bottom: 28px; right: 28px;
+      font-size: 15px; font-weight: 700;
+      color: rgba(255,255,255,0.82);
+      letter-spacing: 0.04em;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.55), 0 0 12px rgba(0,0,0,0.3);
+      pointer-events: none; user-select: none;
+      font-family: system-ui, -apple-system, sans-serif;
+    ">© PhillyWeatherAuthority</div>
+  </div>
+
+</div>
+<script>
+const DATA_URL       = "./data/aam_tendency_latest.txt";
+const ZRANGE         = 1.0;   // ±1 σ/day clip for tendency
+const STALE_WARN     = 3;
+const STALE_ERR      = 14;
+
+// Blue → white → orange → red diverging scale
+// Negative = AAM decelerating (easterly acceleration)
+// Positive = AAM accelerating (westerly acceleration)
+const COLORSCALE = [
+  [0.00, "#08306b"],
+  [0.15, "#2171b5"],
+  [0.35, "#6baed6"],
+  [0.48, "#c6dbef"],
+  [0.50, "#f7f7f7"],
+  [0.52, "#fff5cc"],
+  [0.65, "#fd8d3c"],
+  [0.80, "#e03000"],
+  [1.00, "#7f0000"]
+];
+
+const S = { dates: [], lats: [], tend: [], rangeDays: "60", dispMode: "both" };
+
+const statusEl     = document.getElementById("status");
+const rowsPill     = document.getElementById("rowsPill");
+const latsPill     = document.getElementById("latsPill");
+const lastDataPill = document.getElementById("lastDataPill");
+const modePill     = document.getElementById("modePill");
+const legendShading  = document.getElementById("legendShading");
+const legendContours = document.getElementById("legendContours");
+const bannerStale  = document.getElementById("bannerStale");
+const bannerError  = document.getElementById("bannerError");
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+function checkStaleness(lastDate) {
+  const days = Math.floor((Date.now() - lastDate.getTime()) / 86400000);
+  const str  = lastDate.toISOString().slice(0, 10);
+  if (days >= STALE_ERR) {
+    bannerError.textContent = `⛔ Data significantly out of date — last observation: ${str} (${days} days ago). Check GitHub Actions.`;
+    bannerError.classList.add("show");
+  } else if (days >= STALE_WARN) {
+    bannerStale.textContent = `⚠️ Data may be stale — last observation: ${str} (${days} days ago).`;
+    bannerStale.classList.add("show");
+  }
+}
+
+function parseDate(tok) {
+  const m = tok.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+  return m ? new Date(Date.UTC(+m[1], +m[2]-1, +m[3])) : null;
+}
+
+function parseFile(text) {
+  const lines = text.split(/\r?\n/);
+  let lats = null;
+  const dates = [], tend = [];
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    if (s.startsWith("#")) {
+      const m = s.match(/^#\s*Lats:\s*(.+)$/);
+      if (m) lats = m[1].trim().split(/\s+/).map(Number);
+      continue;
+    }
+    const parts = s.split(/\s+/);
+    if (parts.length < 2) continue;
+    const dt = parseDate(parts[0]);
+    if (!dt) continue;
+    dates.push(dt);
+    tend.push(parts.slice(1).map(Number));
+  }
+  return { lats, dates, tend };
+}
+
+function filterByRange() {
+  const { dates, tend, rangeDays } = S;
+  if (rangeDays === "all") return { dates, tend };
+  const days = Number(rangeDays);
+  const minT = dates[dates.length - 1].getTime() - days * 86400000;
+  const idx  = dates.reduce((a, d, i) => { if (d.getTime() >= minT) a.push(i); return a; }, []);
+  return { dates: idx.map(i => dates[i]), tend: idx.map(i => tend[i]) };
+}
+
+function buildZ(fd, fa) {
+  const nlat = S.lats.length, ndays = fd.length;
+  const TAPER_BANDS = 4;
+  const z = [];
+  for (let li = 0; li < nlat; li++) {
+    const distFromPole = Math.min(li, nlat - 1 - li);
+    const weight = distFromPole >= TAPER_BANDS
+      ? 1.0
+      : 0.5 * (1 - Math.cos(Math.PI * distFromPole / TAPER_BANDS));
+    const row = new Array(ndays);
+    for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li] * weight;
+    z.push(row);
+  }
+  return z;
+}
+
+function heatmapTrace(x, z) {
+  return {
+    type: "heatmap", x, y: S.lats, z,
+    zmin: -ZRANGE, zmax: ZRANGE,
+    colorscale: COLORSCALE,
+    zsmooth: "best",
+    showscale: true,
+    colorbar: {
+      title: { text: "σ/d", side: "right", font: { size: 11 } },
+      tickvals: [-1, -0.5, 0, 0.5, 1],
+      tickfont: { size: 10 },
+      thickness: 10, len: 0.75,
+      x: 1.01, xanchor: "left"
+    },
+    hovertemplate: "Date: %{x}<br>Lat: %{y:.2f}°<br>Tendency: %{z:.3f} σ/d<extra></extra>"
+  };
+}
+
+function contourOverlayTrace(x, z) {
+  return {
+    type: "contour", x, y: S.lats, z,
+    showscale: false,
+    colorscale: [[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
+    contours: {
+      start: -2, end: 2, size: 0.25,
+      showlabels: true,
+      labelfont: { size: 9, color: "#111" },
+      coloring: "none"
+    },
+    line: { width: 1, color: "#222" },
+    hoverinfo: "skip"
+  };
+}
+
+function contoursOnlyTraces(x, z) {
+  const zPos = z.map(row => row.map(v => v > 0 ? v : null));
+  const zNeg = z.map(row => row.map(v => v < 0 ? v : null));
+  const base = {
+    type: "contour", x, y: S.lats, showscale: false,
+    colorscale: [[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
+    contours: { showlabels: true, labelfont: { size: 9, color: "#222" }, coloring: "none" },
+    hoverinfo: "skip"
+  };
+  return [
+    { ...base, z: zPos, name: "Accel (+)", contours: { ...base.contours, start: 0.25, end: 2, size: 0.25 }, line: { width: 1.5, color: "#111", dash: "solid" } },
+    { ...base, z: zNeg, name: "Decel (−)", contours: { ...base.contours, start: -2, end: -0.25, size: 0.25 }, line: { width: 1.5, color: "#444", dash: "dash" } }
+  ];
+}
+
+function makeLayout() {
+  const days  = Number(S.rangeDays);
+  const dtick = days <= 14 ? 86400000 : days <= 60 ? 7 * 86400000 : 14 * 86400000;
+  return {
+    xaxis: {
+      title: "", type: "date", dtick, tickformat: "%b %d",
+      tickangle: -40, showgrid: true, gridcolor: "rgba(180,180,180,0.18)", zeroline: false
+    },
+    yaxis: {
+      title: "Latitude",
+      zeroline: true, zerolinewidth: 1.5, zerolinecolor: "#888",
+      showgrid: true, gridcolor: "rgba(160,160,160,0.25)",
+      tickvals: [-90,-60,-30,0,30,60,90],
+      ticktext: ["90°S","60°S","30°S","EQ","30°N","60°N","90°N"]
+    },
+    margin: { l: 52, r: 10, t: 6, b: 60 },
+    paper_bgcolor: "#fff", plot_bgcolor: "#fff",
+    showlegend: false
+  };
+}
+
+function plot() {
+  if (!S.dates.length || !S.lats.length) return;
+  const { dates: fd, tend: fa } = filterByRange();
+  if (!fd.length) { setStatus("No data in selected range."); return; }
+
+  const x = fd.map(d => d.toISOString().slice(0, 10));
+  const z = buildZ(fd, fa);
+  const mode = S.dispMode;
+  let traces;
+
+  if (mode === "both") {
+    traces = [heatmapTrace(x, z), contourOverlayTrace(x, z)];
+    legendShading.style.display  = "flex";
+    legendContours.style.display = "none";
+    modePill.textContent = "Shading ±1σ/d + contours every 0.25σ/d";
+  } else if (mode === "shading") {
+    traces = [heatmapTrace(x, z)];
+    legendShading.style.display  = "flex";
+    legendContours.style.display = "none";
+    modePill.textContent = "Shading ±1σ/d";
+  } else {
+    traces = contoursOnlyTraces(x, z);
+    legendShading.style.display  = "none";
+    legendContours.style.display = "flex";
+    modePill.textContent = "Contours every 0.25σ/d  |  Solid = + · Dashed = −";
+  }
+
+  Plotly.newPlot("chart", traces, makeLayout(), { responsive: true, displayModeBar: false });
+  rowsPill.textContent = `Rows: ${fd.length}`;
+}
+
+document.querySelectorAll("[data-mode]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-mode]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    S.dispMode = btn.dataset.mode;
+    plot();
+  });
+});
+
+document.querySelectorAll("[data-range]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-range]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    S.rangeDays = btn.dataset.range;
+    plot();
+  });
+});
+
+async function main() {
+  setStatus("Loading AAM tendency data…");
+  try {
+    const r = await fetch(DATA_URL + "?_ts=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { lats, dates, tend } = parseFile(await r.text());
+
+    if (!lats?.length) { setStatus("Could not parse latitude header."); return; }
+    if (!dates.length) { setStatus("File loaded but no data rows found."); return; }
+
+    S.lats = lats; S.dates = dates; S.tend = tend;
+
+    const first = dates[0].toISOString().slice(0, 10);
+    const last  = dates[dates.length - 1].toISOString().slice(0, 10);
+    const lastDate = dates[dates.length - 1];
+
+    latsPill.textContent    = `Lats: ${lats.length} (${lats[0].toFixed(1)}° → ${lats[lats.length-1].toFixed(1)}°)`;
+    rowsPill.textContent    = `Rows: ${dates.length}`;
+    lastDataPill.textContent = `Last data: ${last}`;
+
+    checkStaleness(lastDate);
+
+    setStatus(
+      `${dates.length} days × ${lats.length} latitude bands.  Period: ${first} → ${last}\n` +
+      `Tendency = day-to-day change in standardised AAM anomaly (σ/day).\n` +
+      `Positive = westerly acceleration · Negative = easterly acceleration (deceleration).`
+    );
+    plot();
+  } catch(e) {
+    setStatus("Fetch error: " + String(e) + "\n\nCheck that data/aam_tendency_latest.txt exists in the repo.");
+  }
+}
+
+main();
+</script>
+</body>
+</html>
