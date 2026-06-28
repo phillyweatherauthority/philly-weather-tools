@@ -56,8 +56,12 @@ NOMADS_BASE = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gens/prod"
 REPO_ROOT       = Path(__file__).resolve().parent.parent
 DATA_DIR        = REPO_ROOT / "data"
 CLIMO_NPZ       = DATA_DIR / "aam_climo.npz"
-FCST_MEAN_TXT   = DATA_DIR / "aam_fcst_mean_latest.txt"
-FCST_STD_TXT    = DATA_DIR / "aam_fcst_std_latest.txt"
+FCST_MEAN_TXT        = DATA_DIR / "aam_fcst_mean_latest.txt"
+FCST_STD_TXT         = DATA_DIR / "aam_fcst_std_latest.txt"
+FCST_GLOBAL_TXT      = DATA_DIR / "aam_fcst_global_latest.txt"
+FCST_TEND_MEAN_TXT   = DATA_DIR / "aam_fcst_tend_mean_latest.txt"
+FCST_TEND_STD_TXT    = DATA_DIR / "aam_fcst_tend_std_latest.txt"
+FCST_GLOBAL_TEND_TXT = DATA_DIR / "aam_fcst_global_tend_latest.txt"
 
 GRID_RES = 0.5   # GEFS 0.5° grid
 
@@ -289,6 +293,25 @@ def load_climatology() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 # ── output ────────────────────────────────────────────────────────────────────
+def cos2_weights(lats: np.ndarray) -> np.ndarray:
+    """cos²φ · Δφ normalised weights for latitude integration."""
+    lats_rad = np.deg2rad(lats)
+    cos2     = np.cos(lats_rad) ** 2
+    dlat     = np.abs(np.gradient(lats_rad))
+    w        = cos2 * dlat
+    return w / w.sum()
+
+
+def global_integral(anom: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Integrate (ndays, nlat) → (ndays,) global mean."""
+    return anom @ weights
+
+
+def fcst_tendency(mean_anom: np.ndarray) -> np.ndarray:
+    """Day-to-day difference of ensemble mean → tendency (ndays-1, nlat)."""
+    return np.diff(mean_anom, axis=0)
+
+
 def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
                      mean_anom: np.ndarray, std_anom: np.ndarray) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -310,6 +333,59 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
             lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
         txt_path.write_text("\n".join(lines) + "\n")
         log(f"Wrote {len(fcst_dates)} rows → {txt_path}")
+
+    # Global AAM forecast (cos²φ-weighted integral)
+    weights     = cos2_weights(lats)
+    global_mean = global_integral(mean_anom, weights)   # (ndays,)
+    global_std  = global_integral(std_anom,  weights)   # (ndays,)
+
+    lines_g = [
+        "# GEFS global relative AAM forecast",
+        "# Units: cos²φ-weighted mean sigma / std sigma",
+        f"# Generated: {date.today().isoformat()}",
+        "# Cols: date  mean_sigma  std_sigma",
+    ]
+    for d, m, s in zip(fcst_dates, global_mean, global_std):
+        lines_g.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {m:10.6f}  {s:10.6f}")
+    FCST_GLOBAL_TXT.write_text("\n".join(lines_g) + "\n")
+    log(f"Wrote global AAM forecast → {FCST_GLOBAL_TXT}")
+
+    # Tendency forecast
+    if len(fcst_dates) > 1:
+        tend_mean  = fcst_tendency(mean_anom)       # (ndays-1, nlat)
+        tend_std   = fcst_tendency(std_anom)
+        tend_dates = fcst_dates[1:]
+        tend_mean  = np.clip(tend_mean, -2.0, 2.0)
+        tend_std   = np.clip(np.abs(tend_std), 0.0, 1.0)
+
+        header_t = [
+            "# GEFS relative AAM tendency forecast by latitude",
+            "# Units: sigma/day",
+            f"# Generated: {date.today().isoformat()}",
+            "# Lats: " + " ".join(f"{lat:.2f}" for lat in lats),
+        ]
+        for txt_path, arr in [(FCST_TEND_MEAN_TXT, tend_mean),
+                              (FCST_TEND_STD_TXT,  tend_std)]:
+            lines_t = header_t[:]
+            for d, row in zip(tend_dates, arr):
+                vals = " ".join(f"{v:8.4f}" for v in row)
+                lines_t.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
+            txt_path.write_text("\n".join(lines_t) + "\n")
+            log(f"Wrote tendency forecast → {txt_path}")
+
+        # Global tendency forecast
+        gtend_mean = global_integral(tend_mean, weights)
+        gtend_std  = global_integral(tend_std,  weights)
+        lines_gt = [
+            "# GEFS global relative AAM tendency forecast",
+            "# Units: sigma/day",
+            f"# Generated: {date.today().isoformat()}",
+            "# Cols: date  mean_sigma  std_sigma",
+        ]
+        for d, m, s in zip(tend_dates, gtend_mean, gtend_std):
+            lines_gt.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {m:10.6f}  {s:10.6f}")
+        FCST_GLOBAL_TEND_TXT.write_text("\n".join(lines_gt) + "\n")
+        log(f"Wrote global tendency forecast → {FCST_GLOBAL_TEND_TXT}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
