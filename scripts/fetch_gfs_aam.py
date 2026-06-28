@@ -419,11 +419,32 @@ def main() -> None:
         print("ERROR: no forecast data retrieved.", file=sys.stderr)
         sys.exit(1)
 
-    # GEFS is 0.5° (361 lats), climatology is 2.5° (73 lats) — always interpolate
+    # GEFS is 0.5° (361 lats), climatology is 2.5° (73 lats) — always interpolate.
+    # np.interp requires x (source lats) to be monotonically increasing.
+    # Sort both source grid and data to ascending order before interpolating,
+    # then interpolate to climo grid (which may be descending 90→-90).
     log(f"Interpolating GEFS grid ({len(lats_ref)} lats) to climo grid ({len(climo_lats)} lats) …")
+    log(f"  GEFS lat range: {lats_ref[0]:.1f} → {lats_ref[-1]:.1f}")
+    log(f"  Climo lat range: {climo_lats[0]:.1f} → {climo_lats[-1]:.1f}")
+
+    # Sort GEFS to ascending order for np.interp
+    sort_idx = np.argsort(lats_ref)          # ascending indices
+    lats_asc = lats_ref[sort_idx]             # lats ascending
+
+    # Climo lats — np.interp needs ascending x too
+    climo_asc_idx = np.argsort(climo_lats)
+    climo_asc     = climo_lats[climo_asc_idx]
+
     for fxx in FCST_HOURS:
-        all_aam[fxx] = [np.interp(climo_lats, lats_ref[::-1], a[::-1])
-                        for a in all_aam[fxx]]
+        interp_list = []
+        for a in all_aam[fxx]:
+            a_asc     = a[sort_idx]           # reorder data to match ascending lats
+            a_interp  = np.interp(climo_asc, lats_asc, a_asc)  # interp to ascending climo
+            # Reorder back to match climo_lats original ordering
+            a_final   = np.empty_like(a_interp)
+            a_final[climo_asc_idx] = a_interp
+            interp_list.append(a_final)
+        all_aam[fxx] = interp_list
     lats_ref = climo_lats
 
     # Compute ensemble mean and std, convert to σ anomalies
