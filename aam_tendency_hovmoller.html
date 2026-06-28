@@ -527,8 +527,8 @@ async function main() {
 
     // Load GEFS tendency forecast if available
     if (ftRes && ftRes.ok && ftSRes && ftSRes.ok) {
-      const { dates: fd, rows: ft } = parseTendFile(await ftRes.text());
-      const { rows: fts }            = parseTendFile(await ftSRes.text());
+      const { dates: fd, tend: ft } = parseTendFile(await ftRes.text());
+      const { tend: fts }            = parseTendFile(await ftSRes.text());
       S.fcstDates    = fd;
       S.fcstTend     = ft;
       S.fcstTendStd  = fts;
