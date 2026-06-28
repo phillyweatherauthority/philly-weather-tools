@@ -107,8 +107,12 @@
 </div>
 <script>
 // ── config ───────────────────────────────────────────────────────────────────
-const TEND_URL   = "./data/aam_tendency_latest.txt";
-const GLOBAL_URL = "./data/aam_global_tendency_latest.txt";
+const BASE_URL      = "https://phillyweatherauthority.github.io/philly-weather-tools/data";
+const TEND_URL      = `${BASE_URL}/aam_tendency_latest.txt`;
+const GLOBAL_URL    = `${BASE_URL}/aam_global_tendency_latest.txt`;
+const FCST_TEND_URL = `${BASE_URL}/aam_fcst_tend_mean_latest.txt`;
+const FCST_TEND_STD_URL = `${BASE_URL}/aam_fcst_tend_std_latest.txt`;
+const FCST_GTEND_URL = `${BASE_URL}/aam_fcst_global_tend_latest.txt`;
 const ZRANGE     = 1.0;
 const STALE_WARN = 3;
 const STALE_ERR  = 14;
@@ -129,6 +133,8 @@ const COLORSCALE = [
 const S = {
   dates: [], lats: [], tend: [],
   gDates: [], gTend: [],
+  fcstDates: [], fcstTend: [], fcstTendStd: [],
+  fcstGDates: [], fcstGTend: [], fcstGTendStd: [],
   rangeDays: "60", dispMode: "both"
 };
 
@@ -204,7 +210,9 @@ function parseGlobalFile(text) {
 
 // ── filter ───────────────────────────────────────────────────────────────────
 function filterByRange() {
-  const { dates, tend, gDates, gTend, rangeDays } = S;
+  const { dates, tend, gDates, gTend,
+          fcstDates, fcstTend, fcstTendStd,
+          fcstGDates, fcstGTend, fcstGTendStd, rangeDays } = S;
   if (rangeDays === "all") return { dates, tend, gDates, gTend };
   const days = Number(rangeDays);
   const anchor = dates[dates.length - 1].getTime();
@@ -399,6 +407,77 @@ function plot() {
   // always add global tendency panel
   traces = [...traces, ...globalTendTrace(gx, gTend)];
 
+  // GEFS forecast — Hovmöller extension
+  const today = new Date().toISOString().slice(0, 10);
+  if (S.fcstDates.length) {
+    const fx      = S.fcstDates.map(d => d.toISOString().slice(0,10));
+    const fTendZ  = buildZ(fx.map(d => new Date(d)), S.fcstTend);
+    const fStdZ   = buildZ(fx.map(d => new Date(d)), S.fcstTendStd);
+    // Spread shading
+    traces.push({
+      type:"heatmap", x:fx, y:S.lats, z:fStdZ,
+      zmin:0, zmax:1.0,
+      colorscale:[[0,"rgba(200,200,200,0.0)"],[0.5,"rgba(130,130,130,0.2)"],[1,"rgba(80,80,80,0.38)"]],
+      zsmooth:"best", showscale:false,
+      xaxis:"x", yaxis:"y", hoverinfo:"skip"
+    });
+    // Mean shading (faded)
+    const zFaded = fTendZ.map(row => row.map(v => v * 0.75));
+    traces.push({
+      type:"heatmap", x:fx, y:S.lats, z:zFaded,
+      zmin:-ZRANGE, zmax:ZRANGE,
+      colorscale:COLORSCALE, zsmooth:"best", showscale:false,
+      xaxis:"x", yaxis:"y",
+      hovertemplate:"Fcst: %{x}<br>Lat: %{y:.2f}°<br>Tendency: %{z:.3f}σ/d<extra></extra>"
+    });
+    // Dotted contours on forecast
+    if (mode === "both" || mode === "contours") {
+      traces.push({
+        type:"contour", x:fx, y:S.lats, z:fTendZ,
+        showscale:false,
+        colorscale:[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
+        contours:{ start:-2, end:2, size:0.25, showlabels:true,
+          labelfont:{size:8,color:"#333"}, coloring:"none" },
+        line:{ width:1, color:"#444", dash:"dot" },
+        xaxis:"x", yaxis:"y", hoverinfo:"skip"
+      });
+    }
+    // Today line on Hovmöller
+    traces.push({
+      type:"scatter", x:[today,today],
+      y:[S.lats[0], S.lats[S.lats.length-1]],
+      mode:"lines", line:{color:"#111827",width:2,dash:"dash"},
+      xaxis:"x", yaxis:"y", hoverinfo:"skip", showlegend:false
+    });
+  }
+
+  // GEFS global tendency forecast
+  if (S.fcstGDates.length) {
+    const gfx   = S.fcstGDates.map(d => d.toISOString().slice(0,10));
+    const gfM   = S.fcstGTend;
+    const gfS   = S.fcstGTendStd;
+    const gfUp  = gfM.map((v,i) => v + gfS[i]);
+    const gfDn  = gfM.map((v,i) => v - gfS[i]);
+    traces.push({
+      type:"scatter", x:[...gfx,...gfx.slice().reverse()],
+      y:[...gfUp,...gfDn.slice().reverse()], fill:"toself",
+      fillcolor:"rgba(100,100,100,0.15)", line:{width:0},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false
+    });
+    traces.push({
+      type:"scatter", x:gfx, y:gfM, mode:"lines",
+      line:{color:"#555",width:1.5,dash:"dash"},
+      xaxis:"x2", yaxis:"y2", showlegend:false,
+      hovertemplate:"Fcst tendency: %{x}<br>%{y:.3f}σ/d<extra></extra>"
+    });
+    // Today line on global panel
+    traces.push({
+      type:"scatter", x:[today,today], y:[-4,4],
+      mode:"lines", line:{color:"#111827",width:2,dash:"dash"},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false
+    });
+  }
+
   Plotly.newPlot("charts", traces, makeLayout(days), { responsive: true, displayModeBar: false });
   rowsPill.textContent = `Rows: ${fd.length}`;
 }
@@ -425,9 +504,12 @@ document.querySelectorAll("[data-range]").forEach(btn => {
 async function main() {
   setStatus("Loading AAM tendency data…");
   try {
-    const [tRes, gRes] = await Promise.all([
-      fetch(TEND_URL   + "?_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(GLOBAL_URL + "?_ts=" + Date.now(), { cache: "no-store" })
+    const [tRes, gRes, ftRes, ftSRes, fgRes] = await Promise.all([
+      fetch(TEND_URL        + "?_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(GLOBAL_URL      + "?_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(FCST_TEND_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_TEND_STD_URL + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
+      fetch(FCST_GTEND_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
     if (!tRes.ok) throw new Error(`Tendency file: HTTP ${tRes.status}`);
     if (!gRes.ok) throw new Error(`Global tendency file: HTTP ${gRes.status}`);
@@ -437,6 +519,22 @@ async function main() {
 
     if (!lats?.length || !dates.length) { setStatus("Could not parse tendency data."); return; }
     if (!gDates.length)                 { setStatus("Could not parse global tendency data."); return; }
+
+    // Load GEFS tendency forecast if available
+    if (ftRes && ftRes.ok && ftSRes && ftSRes.ok) {
+      const { dates: fd, rows: ft } = parseTendFile(await ftRes.text());
+      const { rows: fts }            = parseTendFile(await ftSRes.text());
+      S.fcstDates    = fd;
+      S.fcstTend     = ft;
+      S.fcstTendStd  = fts;
+    }
+    if (fgRes && fgRes.ok) {
+      const txt = await fgRes.text();
+      const lines = txt.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+      S.fcstGDates    = lines.map(l => parseDate(l.trim().split(/\s+/)[0])).filter(Boolean);
+      S.fcstGTend     = lines.map(l => Number(l.trim().split(/\s+/)[1]));
+      S.fcstGTendStd  = lines.map(l => Number(l.trim().split(/\s+/)[2]));
+    }
 
     S.lats = lats; S.dates = dates; S.tend = tend;
     S.gDates = gDates; S.gTend = vals;
