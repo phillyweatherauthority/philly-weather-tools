@@ -167,18 +167,42 @@ def extract_ugrd_from_grib(grib_bytes: bytes) -> tuple[np.ndarray, np.ndarray, n
         tmp = f.name
 
     try:
-        datasets = xr.open_dataset(
+        # Open all GRIB messages — may return multiple datasets if
+        # level types differ; filter to isobaricInhPa only
+        ds_list = xr.open_datasets(
             tmp,
             engine="cfgrib",
             backend_kwargs={"indexpath": ""},
-            errors="ignore"
         )
-        u    = datasets["u"].values       # (nlev, nlat, nlon) or (nlat, nlon)
-        lats = datasets.coords["latitude"].values
-        lons = datasets.coords["longitude"].values
+        # Find dataset with u-wind on pressure levels
+        ds = None
+        for d in ds_list:
+            if "u" in d:
+                ds = d
+                break
+        if ds is None:
+            # fallback: single dataset
+            ds = xr.open_dataset(
+                tmp,
+                engine="cfgrib",
+                backend_kwargs={"indexpath": ""},
+            )
+
+        u    = ds["u"].values
+        lats = ds.coords["latitude"].values
+        lons = ds.coords["longitude"].values
         if u.ndim == 2:
             u = u[np.newaxis, :, :]
-        return lats, lons, u
+
+        # Get actual pressure levels present in this file
+        if "isobaricInhPa" in ds.coords:
+            actual_levels_hpa = ds.coords["isobaricInhPa"].values
+        elif "pressure_level" in ds.coords:
+            actual_levels_hpa = ds.coords["pressure_level"].values
+        else:
+            actual_levels_hpa = np.array(LEVELS_HPA[:u.shape[0]])
+
+        return lats, lons, u, actual_levels_hpa
     finally:
         os.unlink(tmp)
         for ext in [".idx", ".923a8.idx"]:
@@ -246,9 +270,9 @@ def fetch_member_fxx(date_str: str, cycle: str,
             grib_chunks.append(chunk)
 
         grib_bytes = b"".join(grib_chunks)
-        lats, _, u_array = extract_ugrd_from_grib(grib_bytes)
+        lats, _, u_array, actual_levels_hpa = extract_ugrd_from_grib(grib_bytes)
 
-        levels_pa = np.array(LEVELS_HPA, dtype=np.float64) * 100.0
+        levels_pa = actual_levels_hpa.astype(np.float64) * 100.0
         aam = aam_from_ugrd(lats, u_array, levels_pa)
         return lats, aam
 
