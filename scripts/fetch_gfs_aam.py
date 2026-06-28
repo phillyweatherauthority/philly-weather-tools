@@ -160,25 +160,31 @@ def extract_ugrd_from_grib(grib_bytes: bytes) -> tuple[np.ndarray, np.ndarray, n
     Returns (lats, lons, u_array shape (nlev, nlat, nlon)).
     Uses cfgrib via a temp file.
     """
-    import cfgrib
+    import xarray as xr
 
     with tempfile.NamedTemporaryFile(suffix=".grib2", delete=False) as f:
         f.write(grib_bytes)
         tmp = f.name
 
     try:
-        ds = cfgrib.open_dataset(tmp, backend_kwargs={"indexpath": ""})
-        u  = ds["u"].values       # (nlev, nlat, nlon) or (nlat, nlon)
-        lats = ds.coords["latitude"].values
-        lons = ds.coords["longitude"].values
+        datasets = xr.open_dataset(
+            tmp,
+            engine="cfgrib",
+            backend_kwargs={"indexpath": ""},
+            errors="ignore"
+        )
+        u    = datasets["u"].values       # (nlev, nlat, nlon) or (nlat, nlon)
+        lats = datasets.coords["latitude"].values
+        lons = datasets.coords["longitude"].values
         if u.ndim == 2:
             u = u[np.newaxis, :, :]
         return lats, lons, u
     finally:
         os.unlink(tmp)
-        idx_tmp = tmp + ".idx"
-        if os.path.exists(idx_tmp):
-            os.unlink(idx_tmp)
+        for ext in [".idx", ".923a8.idx"]:
+            p = tmp + ext
+            if os.path.exists(p):
+                os.unlink(p)
 
 
 # ── AAM computation ───────────────────────────────────────────────────────────
@@ -254,7 +260,7 @@ def fetch_member_fxx(date_str: str, cycle: str,
 # ── climatology ───────────────────────────────────────────────────────────────
 def load_climatology() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if not CLIMO_NPZ.exists():
-        log("ERROR: aam_climo.npz not found. Run build_aam_climo workflow first.",
+        print("ERROR: aam_climo.npz not found. Run build_aam_climo workflow first.",
             file=sys.stderr)
         sys.exit(1)
     data = np.load(CLIMO_NPZ)
@@ -313,7 +319,7 @@ def main() -> None:
         log(f"  Got {len(all_aam[fxx])}/{N_MEMBERS} members")
 
     if lats_ref is None:
-        log("ERROR: no forecast data retrieved.", file=sys.stderr)
+        print("ERROR: no forecast data retrieved.", file=sys.stderr)
         sys.exit(1)
 
     # Verify lat grid matches climatology
