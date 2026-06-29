@@ -278,6 +278,8 @@ def fetch_member_fxx(date_str: str, cycle: str,
 
         grib_bytes = b"".join(grib_chunks)
         lats, _, u_array, actual_levels_hpa = extract_ugrd_from_grib(grib_bytes)
+        if mem == 0 and fxx == 6:
+            log(f"    GEFS lats[0:3]: {lats[:3]}  lats[-3:]: {lats[-3:]}")
         levels_pa = actual_levels_hpa.astype(np.float64) * 100.0
         aam = aam_from_ugrd(lats, u_array, levels_pa)
         return lats, aam
