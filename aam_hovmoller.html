@@ -29,8 +29,6 @@
       background: var(--pill-bg); border: 1px solid var(--pill-border);
       color: var(--pill-text); white-space: nowrap;
     }
-
-    /* ── stale / error banner ── */
     .banner {
       display: none;
       margin-top: 10px; padding: 8px 14px; border-radius: 10px;
@@ -45,8 +43,6 @@
       color: var(--err-text);
     }
     .banner.show { display: block; }
-
-    /* ── button rows ── */
     .btn-row {
       display: flex; gap: 8px; flex-wrap: wrap;
       margin-top: 10px; align-items: center;
@@ -63,7 +59,6 @@
     .btn:hover { background: #f0f0f0; }
     .btn.active { background: #111827; color: #fff; border-color: #111827; }
     .btn-divider { width: 1px; height: 24px; background: #e0e0e0; margin: 0 4px; }
-
     #chart { height: 560px; }
     @media (min-width: 600px) { #chart { height: 720px; } }
     @media (min-width: 900px) { #chart { height: 860px; } }
@@ -72,8 +67,6 @@
       line-height: 1.35; margin-top: 10px;
     }
     code { background: #f3f4f6; padding: 2px 6px; border-radius: 8px; }
-
-    /* ── legends ── */
     .legend-row {
       display: flex; align-items: center; gap: 10px;
       margin-top: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap;
@@ -91,13 +84,12 @@
 <body>
 <div class="wrap">
 
-  <!-- ── header card ─────────────────────────────────────────────── -->
   <div class="card">
     <h1>RELATIVE AAM ANOMALY — LATITUDE × TIME (HOVMÖLLER)</h1>
 
     <div class="bar">
       <span class="pill">Source: <code>./data/aam_lat_latest.txt</code></span>
-      <span class="pill">Dataset: NCEP/NCAR Reanalysis 1</span>
+      <span class="pill">Dataset: ERA5 Reanalysis</span>
       <span class="pill">Base: 1980–2010</span>
       <span class="pill" id="rowsPill">Rows: —</span>
       <span class="pill" id="latsPill">Lats: —</span>
@@ -105,19 +97,15 @@
       <span class="pill" id="modePill">Z: σ anomaly</span>
     </div>
 
-    <!-- stale / error banners -->
     <div class="banner warn" id="bannerStale"></div>
     <div class="banner error" id="bannerError"></div>
 
-    <!-- controls -->
     <div class="btn-row">
       <span class="btn-label">Display</span>
       <button class="btn active" data-mode="both">Shading + Contours</button>
       <button class="btn" data-mode="shading">Shading only</button>
       <button class="btn" data-mode="contours">Contours only</button>
-
       <div class="btn-divider"></div>
-
       <span class="btn-label">Range</span>
       <button class="btn active" data-range="60">60d</button>
       <button class="btn" data-range="45">45d</button>
@@ -125,15 +113,12 @@
       <button class="btn" data-range="14">14d</button>
     </div>
 
-    <!-- shading legend -->
     <div class="legend-row" id="legendShading">
       <span>−1.5σ</span>
       <div class="legend-grad"></div>
       <span>+1.5σ</span>
       <span style="margin-left:8px">Blue = easterly anomaly (−AAM) · Yellow/Orange/Red = westerly anomaly (+AAM)</span>
     </div>
-
-    <!-- contour-only legend -->
     <div class="legend-row" id="legendContours" style="display:none">
       <div class="legend-item">
         <div class="lline lline-solid"></div>
@@ -149,58 +134,52 @@
     <div class="status" id="status"></div>
   </div>
 
-  <!-- ── chart card ─────────────────────────────────────────────── -->
   <div class="card" style="position:relative;">
     <div id="chart"></div>
     <div style="
       position: absolute;
       bottom: 28px; right: 28px;
-      font-size: 15px;
-      font-weight: 700;
+      font-size: 15px; font-weight: 700;
       color: rgba(255,255,255,0.82);
       letter-spacing: 0.04em;
       text-shadow: 0 1px 4px rgba(0,0,0,0.55), 0 0 12px rgba(0,0,0,0.3);
-      pointer-events: none;
-      user-select: none;
+      pointer-events: none; user-select: none;
       font-family: system-ui, -apple-system, sans-serif;
     ">© PhillyWeatherAuthority</div>
   </div>
 
 </div>
 <script>
-// ── config ──────────────────────────────────────────────────────────────
+// ── config ───────────────────────────────────────────────────────────────────
 const DATA_URL        = "./data/aam_lat_latest.txt";
-const ZRANGE          = 1.5;      // ±σ clip for color scale
-const STALE_WARN_DAYS = 3;        // show warning banner after this many days
-const STALE_ERR_DAYS  = 14;       // escalate to error banner after this many days
-const FCST_MEAN_URL   = "./data/aam_fcst_mean_latest.txt";
-const FCST_STD_URL    = "./data/aam_fcst_std_latest.txt";
-const FCST_GLOBAL_URL = "./data/aam_fcst_global_latest.txt";
 const OBS_GLOBAL_URL  = "./data/aam_global_latest.txt";
+const FCST_GLOBAL_URL = "./data/aam_fcst_global_latest.txt";
+const ZRANGE          = 1.5;
+const STALE_WARN_DAYS = 3;
+const STALE_ERR_DAYS  = 14;
 
 const COLORSCALE = [
-  [0.00, "#08306b"],   // deep navy  (−1.5σ, strong easterly)
-  [0.15, "#2171b5"],   // blue
-  [0.35, "#6baed6"],   // steel blue
-  [0.48, "#c6dbef"],   // pale blue-white
-  [0.50, "#f7f7f7"],   // white (zero)
-  [0.52, "#fff5cc"],   // cream
-  [0.65, "#ffcc00"],   // yellow
-  [0.78, "#ff8c00"],   // orange
-  [0.88, "#e03000"],   // orange-red
-  [1.00, "#7f0000"]    // deep red  (+1.5σ, strong westerly)
+  [0.00, "#08306b"],
+  [0.15, "#2171b5"],
+  [0.35, "#6baed6"],
+  [0.48, "#c6dbef"],
+  [0.50, "#f7f7f7"],
+  [0.52, "#fff5cc"],
+  [0.65, "#ffcc00"],
+  [0.78, "#ff8c00"],
+  [0.88, "#e03000"],
+  [1.00, "#7f0000"]
 ];
 
-// ── state ───────────────────────────────────────────────────────────────
+// ── state ────────────────────────────────────────────────────────────────────
 const S = {
   dates: [], lats: [], anom: [],
-  fcstDates: [], fcstMean: [], fcstStd: [],
-  fcstGDates: [], fcstGlobal: [], fcstGStd: [],
   obsDates: [], obsGlobal: [],
+  fcstGDates: [], fcstGlobal: [], fcstGStd: [],
   rangeDays: "60", dispMode: "both"
 };
 
-// ── DOM ─────────────────────────────────────────────────────────────────
+// ── DOM ──────────────────────────────────────────────────────────────────────
 const statusEl       = document.getElementById("status");
 const rowsPill       = document.getElementById("rowsPill");
 const latsPill       = document.getElementById("latsPill");
@@ -212,18 +191,15 @@ const bannerStale    = document.getElementById("bannerStale");
 const bannerError    = document.getElementById("bannerError");
 
 function setStatus(msg) { statusEl.textContent = msg; }
-function log(msg) { console.log(msg); }
 
-// ── stale check ──────────────────────────────────────────────────────────
+// ── staleness ─────────────────────────────────────────────────────────────────
 function checkStaleness(lastDate) {
   const daysSince = Math.floor((Date.now() - lastDate.getTime()) / 86400000);
   const lastStr   = lastDate.toISOString().slice(0, 10);
-
   if (daysSince >= STALE_ERR_DAYS) {
     bannerError.textContent =
       `⛔ Data is significantly out of date — last observation: ${lastStr} (${daysSince} days ago). ` +
-      `Check GitHub Actions → Update Relative AAM → Run workflow. ` +
-      `The upstream AER / NCEP source file may also have stopped updating.`;
+      `Check GitHub Actions → Update Relative AAM → Run workflow.`;
     bannerError.classList.add("show");
   } else if (daysSince >= STALE_WARN_DAYS) {
     bannerStale.textContent =
@@ -236,7 +212,7 @@ function checkStaleness(lastDate) {
   }
 }
 
-// ── parse ────────────────────────────────────────────────────────────────
+// ── parsers ───────────────────────────────────────────────────────────────────
 function parseDate(tok) {
   const m = tok.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
   return m ? new Date(Date.UTC(+m[1], +m[2]-1, +m[3])) : null;
@@ -264,30 +240,7 @@ function parseFile(text) {
   return { lats, dates, anom };
 }
 
-// ── forecast parser ─────────────────────────────────────────────────────────
-function parseFcstFile(text) {
-  const lines = text.split(/\r?\n/);
-  let lats = null;
-  const dates = [], rows = [];
-  for (const line of lines) {
-    const s = line.trim();
-    if (!s) continue;
-    if (s.startsWith("#")) {
-      const m = s.match(/^#\s*Lats:\s*(.+)$/);
-      if (m) lats = m[1].trim().split(/\s+/).map(Number);
-      continue;
-    }
-    const parts = s.split(/\s+/);
-    if (parts.length < 2) continue;
-    const dt = parseDate(parts[0]);
-    if (!dt) continue;
-    dates.push(dt);
-    rows.push(parts.slice(1).map(Number));
-  }
-  return { lats, dates, rows };
-}
-
-// ── filter ───────────────────────────────────────────────────────────────
+// ── filter ────────────────────────────────────────────────────────────────────
 function filterByRange() {
   const { dates, anom, rangeDays } = S;
   if (rangeDays === "all") return { dates, anom };
@@ -297,31 +250,22 @@ function filterByRange() {
   return { dates: idx.map(i => dates[i]), anom: idx.map(i => anom[i]) };
 }
 
-// ── build z [nlat][ndays] ─────────────────────────────────────────────────
+// ── z matrix ─────────────────────────────────────────────────────────────────
 function buildZ(fd, fa) {
   const nlat = S.lats.length, ndays = fd.length;
+  const TAPER = 4;
   const z = [];
-  // Taper anomaly values toward zero approaching the poles.
-  // ERA5 polar grid cells have near-zero climatological std → division
-  // artifacts appear as saturated solid bands at 90N/90S.
-  // Rather than nulling them (abrupt cutoff) or showing the artifact,
-  // we blend each polar band toward zero using a cosine taper weight
-  // so real signals fade naturally to the pole edge.
-  const TAPER_BANDS = 4;  // number of bands from each pole to taper across
   for (let li = 0; li < nlat; li++) {
-    // distance from nearest pole in bands (0 = at pole, TAPER_BANDS = edge of taper zone)
-    const distFromPole = Math.min(li, nlat - 1 - li);
-    const weight = distFromPole >= TAPER_BANDS
-      ? 1.0
-      : 0.5 * (1 - Math.cos(Math.PI * distFromPole / TAPER_BANDS));  // cosine ramp 0→1
-    const row = new Array(ndays);
+    const dist   = Math.min(li, nlat - 1 - li);
+    const weight = dist >= TAPER ? 1.0 : 0.5 * (1 - Math.cos(Math.PI * dist / TAPER));
+    const row    = new Array(ndays);
     for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li] * weight;
     z.push(row);
   }
   return z;
 }
 
-// ── traces ────────────────────────────────────────────────────────────────
+// ── ERA5 Hovmöller traces ─────────────────────────────────────────────────────
 function heatmapTrace(x, z) {
   return {
     type: "heatmap", x, y: S.lats, z,
@@ -333,9 +277,9 @@ function heatmapTrace(x, z) {
       tickvals: [-1.5, -1, -0.5, 0, 0.5, 1, 1.5],
       tickfont: { size: 10 },
       thickness: 10, len: 0.75,
-      x: 1.01, xanchor: "left",
+      x: 1.01, xanchor: "left"
     },
-    zsmooth: "best",   // bilinear interpolation — removes pixel grid appearance
+    zsmooth: "best",
     xaxis: "x", yaxis: "y",
     hovertemplate: "Date: %{x}<br>Lat: %{y:.2f}°<br>σ: %{z:.2f}<extra></extra>"
   };
@@ -359,141 +303,26 @@ function contourOverlayTrace(x, z) {
 }
 
 function contoursOnlyTraces(x, z) {
-  const zPos = z.map(row => row.map(v => (v > 0  ? v : null)));
-  const zNeg = z.map(row => row.map(v => (v < 0  ? v : null)));
-
+  const zPos = z.map(row => row.map(v => v > 0  ? v : null));
+  const zNeg = z.map(row => row.map(v => v < 0  ? v : null));
   const base = {
     type: "contour", x, y: S.lats,
     showscale: false,
     colorscale: [[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
-    contours: {
-      showlabels: true,
-      labelfont: { size: 9, color: "#222" },
-      coloring: "none"
-    },
+    contours: { showlabels: true, labelfont: { size: 9, color: "#222" }, coloring: "none" },
     hoverinfo: "skip"
   };
-
-  const posTrace = {
-    ...base, z: zPos,
-    name: "Westerly (+)",
-    contours: { ...base.contours, start: 0.5, end: 4, size: 0.5 },
-    line: { width: 1.5, color: "#111", dash: "solid" },
-    xaxis: "x", yaxis: "y"
-  };
-  const negTrace = {
-    ...base, z: zNeg,
-    name: "Easterly (−)",
-    contours: { ...base.contours, start: -4, end: -0.5, size: 0.5 },
-    line: { width: 1.5, color: "#444", dash: "dash" },
-    xaxis: "x", yaxis: "y"
-  };
-  return [posTrace, negTrace];
-}
-
-// ── layout ────────────────────────────────────────────────────────────────
-// ── forecast traces ──────────────────────────────────────────────────────────
-function buildFcstZ(fa) {
-  const nlat = S.lats.length, ndays = fa.length;
-  const TAPER = 4;
-  const z = [];
-  for (let li = 0; li < nlat; li++) {
-    const dist   = Math.min(li, nlat - 1 - li);
-    const weight = dist >= TAPER ? 1.0 : 0.5 * (1 - Math.cos(Math.PI * dist / TAPER));
-    const row    = new Array(ndays);
-    for (let ti = 0; ti < ndays; ti++) row[ti] = fa[ti][li] * weight;
-    z.push(row);
-  }
-  return z;
-}
-
-function fcstMeanTrace(x, z) {
-  // Slightly faded version of same colorscale
-  const zFaded = z.map(row => row.map(v => v * 0.75));
-  return {
-    type: "heatmap", x, y: S.lats, z: zFaded,
-    zmin: -ZRANGE, zmax: ZRANGE,
-    colorscale: COLORSCALE,
-    zsmooth: "best",
-    showscale: false,
-    hovertemplate: "Fcst: %{x}<br>Lat: %{y:.2f}\u00b0<br>Ensemble mean: %{z:.2f}\u03c3<extra></extra>"
-  };
-}
-
-function fcstContourTrace(x, z) {
-  // Contour overlay for forecast period — dashed to distinguish from observed
-  return {
-    type: "contour", x, y: S.lats, z,
-    showscale: false,
-    colorscale: [[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
-    contours: {
-      start: -4, end: 4, size: 0.5,
-      showlabels: true,
-      labelfont: { size: 8, color: "#333" },
-      coloring: "none"
-    },
-    line: { width: 1, color: "#444", dash: "dot" },
-    xaxis: "x", yaxis: "y",
-    hoverinfo: "skip"
-  };
-}
-
-function fcstSpreadTrace(x, zStd) {
-  const SPREAD_CS = [
-    [0.0, "rgba(200,200,200,0.0)"],
-    [0.5, "rgba(130,130,130,0.2)"],
-    [1.0, "rgba(80,80,80,0.42)"]
+  return [
+    { ...base, z: zPos, name: "Westerly (+)",
+      contours: { ...base.contours, start: 0.5, end: 4, size: 0.5 },
+      line: { width: 1.5, color: "#111", dash: "solid" }, xaxis: "x", yaxis: "y" },
+    { ...base, z: zNeg, name: "Easterly (−)",
+      contours: { ...base.contours, start: -4, end: -0.5, size: 0.5 },
+      line: { width: 1.5, color: "#444", dash: "dash" }, xaxis: "x", yaxis: "y" }
   ];
-  return {
-    type: "heatmap", x, y: S.lats, z: zStd,
-    zmin: 0, zmax: 1.5,
-    colorscale: SPREAD_CS,
-    zsmooth: "best",
-    showscale: false,
-    xaxis: "x", yaxis: "y",
-    hovertemplate: "Spread \u00b11\u03c3: %{z:.2f}<extra></extra>"
-  };
 }
 
-function todayLine(todayStr) {
-  return {
-    type: "scatter",
-    x: [todayStr, todayStr],
-    y: [S.lats[0], S.lats[S.lats.length - 1]],
-    mode: "lines",
-    line: { color: "#111827", width: 2, dash: "dash" },
-    xaxis: "x", yaxis: "y",
-    hoverinfo: "skip",
-    showlegend: false
-  };
-}
-
-function todayLine2(todayStr) {
-  // Today line for global panel
-  return {
-    type: "scatter",
-    x: [todayStr, todayStr],
-    y: [-4, 4],
-    mode: "lines",
-    line: { color: "#111827", width: 2, dash: "dash" },
-    xaxis: "x2", yaxis: "y2",
-    hoverinfo: "skip",
-    showlegend: false
-  };
-}
-
-function todayAnnotation(todayStr) {
-  return {
-    x: todayStr, y: 1.0,
-    xref: "x", yref: "paper",
-    text: "FCST →",
-    showarrow: false,
-    xanchor: "left",
-    font: { size: 10, color: "#555" },
-    yanchor: "bottom"
-  };
-}
-
+// ── layout ────────────────────────────────────────────────────────────────────
 function makeLayout() {
   const days = Number(S.rangeDays);
   const dtick = days <= 14 ? 86400000
@@ -520,7 +349,8 @@ function makeLayout() {
       title: "σ", domain: [0.0, 0.27],
       zeroline: true, zerolinewidth: 1.5, zerolinecolor: "#555",
       showgrid: true, gridcolor: "rgba(160,160,160,0.2)",
-      tickfont: { size: 10 }
+      tickfont: { size: 10 },
+      autorange: true
     },
     annotations: [
       { text: "HOVMÖLLER", xref: "paper", yref: "paper",
@@ -536,7 +366,7 @@ function makeLayout() {
   };
 }
 
-// ── render ────────────────────────────────────────────────────────────────
+// ── render ────────────────────────────────────────────────────────────────────
 function plot() {
   if (!S.dates.length || !S.lats.length) return;
   const { dates: fd, anom: fa } = filterByRange();
@@ -565,29 +395,14 @@ function plot() {
     modePill.textContent = "Contours every 0.5σ  |  Solid = + · Dashed = −";
   }
 
-  // Append forecast traces if data is available
+  // ── Global AAM panel ─────────────────────────────────────────────────────
   const today = new Date().toISOString().slice(0, 10);
-  if (S.fcstDates.length) {
-    const fx = S.fcstDates.map(d => d.toISOString().slice(0, 10));
-    const fMeanZ = buildFcstZ(S.fcstMean);
-    const fStdZ  = buildFcstZ(S.fcstStd);
-    if (mode !== "contours") {
-      traces.push(fcstSpreadTrace(fx, fStdZ));
-      traces.push(fcstMeanTrace(fx, fMeanZ));
-    }
-    if (mode === "both" || mode === "contours") {
-      traces.push(fcstContourTrace(fx, fMeanZ));
-    }
-    traces.push(todayLine(today));
-  }
 
-  // ── Global AAM panel ──
-  const today2 = new Date().toISOString().slice(0, 10);
   // Observed global AAM
   if (S.obsGlobal.length) {
     const ox = S.obsDates
-      .filter(d => d.getTime() >= (new Date(fd[0]).getTime()))
-      .map(d => d.toISOString().slice(0,10));
+      .filter(d => d.getTime() >= fd[0].getTime())
+      .map(d => d.toISOString().slice(0, 10));
     const oy = S.obsGlobal.slice(S.obsGlobal.length - ox.length);
     const posY = oy.map(v => v > 0 ? v : 0);
     const negY = oy.map(v => v < 0 ? v : 0);
@@ -602,34 +417,33 @@ function plot() {
       xaxis:"x2", yaxis:"y2", showlegend:false,
       hovertemplate:"Date: %{x}<br>Global AAM: %{y:.3f}σ<extra></extra>" });
   }
-  // Forecast global AAM
+
+  // Forecast global AAM — kept, it's well-behaved as a scalar integral
   if (S.fcstGDates.length) {
-    const gx   = S.fcstGDates.map(d => d.toISOString().slice(0,10));
-    const gMean = S.fcstGlobal;
-    const gStd  = S.fcstGStd;
-    const gUp   = gMean.map((v,i) => v + gStd[i]);
-    const gDn   = gMean.map((v,i) => v - gStd[i]);
+    const gx  = S.fcstGDates.map(d => d.toISOString().slice(0, 10));
+    const gM  = S.fcstGlobal;
+    const gS  = S.fcstGStd;
+    const gUp = gM.map((v, i) => v + gS[i]);
+    const gDn = gM.map((v, i) => v - gS[i]);
     traces.push({ type:"scatter", x:[...gx,...gx.slice().reverse()],
       y:[...gUp,...gDn.slice().reverse()], fill:"toself",
       fillcolor:"rgba(100,100,100,0.15)", line:{width:0},
       xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false });
-    traces.push({ type:"scatter", x:gx, y:gMean, mode:"lines",
+    traces.push({ type:"scatter", x:gx, y:gM, mode:"lines",
       line:{color:"#555", width:1.5, dash:"dash"},
       xaxis:"x2", yaxis:"y2", showlegend:false,
       hovertemplate:"Fcst: %{x}<br>Ensemble mean: %{y:.3f}σ<extra></extra>" });
-    traces.push(todayLine2(today2));
+    // Today line — y extent kept small so autorange isn't blown out
+    traces.push({ type:"scatter", x:[today, today], y:[-0.5, 0.5],
+      mode:"lines", line:{color:"#111827", width:2, dash:"dash"},
+      xaxis:"x2", yaxis:"y2", hoverinfo:"skip", showlegend:false });
   }
 
-  const layout = makeLayout();
-  if (S.fcstDates.length) {
-    layout.annotations.push(todayAnnotation(today));
-  }
-
-  Plotly.newPlot("chart", traces, layout, { responsive: true, displayModeBar: false });
-  rowsPill.textContent = `Rows: ${fd.length}${S.fcstDates.length ? " + " + S.fcstDates.length + "d fcst" : ""}`;
+  Plotly.newPlot("chart", traces, makeLayout(), { responsive: true, displayModeBar: false });
+  rowsPill.textContent = `Rows: ${fd.length}`;
 }
 
-// ── button wiring ─────────────────────────────────────────────────────────
+// ── button wiring ─────────────────────────────────────────────────────────────
 document.querySelectorAll("[data-mode]").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("[data-mode]").forEach(b => b.classList.remove("active"));
@@ -638,7 +452,6 @@ document.querySelectorAll("[data-mode]").forEach(btn => {
     plot();
   });
 });
-
 document.querySelectorAll("[data-range]").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("[data-range]").forEach(b => b.classList.remove("active"));
@@ -648,15 +461,12 @@ document.querySelectorAll("[data-range]").forEach(btn => {
   });
 });
 
-// ── fetch & boot ──────────────────────────────────────────────────────────
+// ── fetch & boot ──────────────────────────────────────────────────────────────
 async function main() {
   setStatus("Loading AAM data…");
   try {
-    // Fetch observed ERA5 data + forecast files in parallel
-    const [obsResp, fcstMeanResp, fcstStdResp, obsGlobResp, fcstGlobResp] = await Promise.all([
+    const [obsResp, obsGlobResp, fcstGlobResp] = await Promise.all([
       fetch(DATA_URL        + "?_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(FCST_MEAN_URL   + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
-      fetch(FCST_STD_URL    + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
       fetch(OBS_GLOBAL_URL  + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
       fetch(FCST_GLOBAL_URL + "?_ts=" + Date.now(), { cache: "no-store" }).catch(() => null),
     ]);
@@ -664,29 +474,15 @@ async function main() {
     if (!obsResp.ok) throw new Error(`HTTP ${obsResp.status}`);
     const { lats, dates, anom } = parseFile(await obsResp.text());
 
-    // Load forecast if available (gracefully skip if not yet generated)
-    if (fcstMeanResp && fcstMeanResp.ok && fcstStdResp && fcstStdResp.ok) {
-      const { dates: fDates, rows: fMean } = parseFcstFile(await fcstMeanResp.text());
-      const { rows: fStd }                 = parseFcstFile(await fcstStdResp.text());
-      S.fcstDates = fDates;
-      S.fcstMean  = fMean;
-      S.fcstStd   = fStd;
-      log(`Forecast: ${fDates.length} days loaded`);
-    } else {
-      log("Forecast files not yet available — showing observed only");
-    }
-
-    // Observed global AAM
     if (obsGlobResp && obsGlobResp.ok) {
-      const txt = await obsGlobResp.text();
+      const txt   = await obsGlobResp.text();
       const lines = txt.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
       S.obsDates  = lines.map(l => parseDate(l.trim().split(/\s+/)[0])).filter(Boolean);
       S.obsGlobal = lines.map(l => Number(l.trim().split(/\s+/)[1]));
     }
 
-    // Forecast global AAM
     if (fcstGlobResp && fcstGlobResp.ok) {
-      const txt = await fcstGlobResp.text();
+      const txt   = await fcstGlobResp.text();
       const lines = txt.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
       S.fcstGDates  = lines.map(l => parseDate(l.trim().split(/\s+/)[0])).filter(Boolean);
       S.fcstGlobal  = lines.map(l => Number(l.trim().split(/\s+/)[1]));
@@ -694,32 +490,24 @@ async function main() {
     }
 
     if (!lats?.length) {
-      setStatus(
-        "Could not parse latitude header.\n" +
-        "Expected a comment line:  # Lats: -88.75 -86.25 ... 88.75\n" +
-        "Make sure the GitHub Action has run and written data/aam_lat_latest.txt."
-      );
+      setStatus("Could not parse latitude header.\nMake sure the GitHub Action has run and written data/aam_lat_latest.txt.");
       return;
     }
     if (!dates.length) {
-      setStatus(
-        "File loaded but no data rows found.\n" +
-        "Expected rows like:  2024.01.01  val0 val1 ... valN"
-      );
+      setStatus("File loaded but no data rows found.\nExpected rows like:  2024.01.01  val0 val1 ... valN");
       return;
     }
 
     S.lats = lats; S.dates = dates; S.anom = anom;
 
-    const first   = dates[0].toISOString().slice(0, 10);
-    const last    = dates[dates.length - 1].toISOString().slice(0, 10);
+    const first    = dates[0].toISOString().slice(0, 10);
+    const last     = dates[dates.length - 1].toISOString().slice(0, 10);
     const lastDate = dates[dates.length - 1];
 
-    latsPill.textContent    = `Lats: ${lats.length} (${lats[0].toFixed(1)}° → ${lats[lats.length-1].toFixed(1)}°)`;
-    rowsPill.textContent    = `Rows: ${dates.length}`;
-    lastDataPill.textContent = `Last data: ${last}`;   // reflects actual data, not page-load time
+    latsPill.textContent     = `Lats: ${lats.length} (${lats[0].toFixed(1)}° → ${lats[lats.length-1].toFixed(1)}°)`;
+    rowsPill.textContent     = `Rows: ${dates.length}`;
+    lastDataPill.textContent = `Last data: ${last}`;
 
-    // ── staleness check ──
     checkStaleness(lastDate);
 
     setStatus(
@@ -729,11 +517,8 @@ async function main() {
     );
     plot();
 
-  } catch (e) {
-    setStatus(
-      "Fetch error: " + String(e) + "\n\n" +
-      "Trigger the GitHub Action via Actions → Update Relative AAM → Run workflow."
-    );
+  } catch(e) {
+    setStatus("Fetch error: " + String(e) + "\n\nTrigger the GitHub Action via Actions → Update Relative AAM → Run workflow.");
   }
 }
 
