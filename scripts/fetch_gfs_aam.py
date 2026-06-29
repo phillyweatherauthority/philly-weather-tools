@@ -52,7 +52,7 @@ LEVELS_HPA = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50, 2
 # 7 forecast days; each day uses 4 six-hourly snapshots averaged to daily mean.
 # Day N covers hours (N-1)*24+6 through N*24 in 6-hr steps.
 N_FCST_DAYS   = 7
-HOURS_PER_DAY = [6, 12, 18, 24]
+HOURS_PER_DAY = [6, 12, 24]
 
 def day_hours(day: int) -> list[int]:
     """Return the 4 forecast hours for day N (1-based)."""
@@ -60,7 +60,7 @@ def day_hours(day: int) -> list[int]:
     return [base + h for h in HOURS_PER_DAY]
 
 # Number of ensemble members (control + 30 perturbed)
-N_MEMBERS = 31
+N_MEMBERS = 22
 
 # AWS S3 base — primary source, no auth
 AWS_BASE    = "https://noaa-gefs-pds.s3.amazonaws.com"
@@ -278,8 +278,6 @@ def fetch_member_fxx(date_str: str, cycle: str,
 
         grib_bytes = b"".join(grib_chunks)
         lats, _, u_array, actual_levels_hpa = extract_ugrd_from_grib(grib_bytes)
-        if fxx == 6 and member == 0:
-            log(f"    GEFS lats[0:3]: {lats[:3]}  lats[-3:]: {lats[-3:]}")
         levels_pa = actual_levels_hpa.astype(np.float64) * 100.0
         aam = aam_from_ugrd(lats, u_array, levels_pa)
         return lats, aam
