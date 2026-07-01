@@ -2,8 +2,7 @@
 # Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels
 # Climatology base: 1980–2010
 # Units: cos²φ-weighted mean sigma/day across all latitudes
-# Generated: 2026-06-30
-2026.05.02    0.032023
+# Generated: 2026-07-01
 2026.05.03    0.098070
 2026.05.04    0.058991
 2026.05.05   -0.030125
