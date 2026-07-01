@@ -1,5 +1,5 @@
-# Relative AAM anomaly by latitude — ERA5 reanalysis
-# Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels
+# Relative AAM anomaly by latitude — ERA5 reanalysis + GFS f000 gap-fill
+# Source: ECMWF Copernicus CDS (ERA5) + NOAA AWS S3 (GFS f000 analysis)
 # Climatology base: 1980–2010 (31-day centred smoothing)
 # Units: standardised sigma departures
 # Generated: 2026-07-01
