@@ -1,4 +1,4 @@
-# Global relative AAM anomaly — ERA5 reanalysis
+# Global relative AAM anomaly — ERA5 reanalysis + GFS f000 gap-fill
 # Units: cos²φ-weighted mean sigma
 # Generated: 2026-07-01
 # Cols: date  sigma

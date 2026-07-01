@@ -1,5 +1,5 @@
-# Global relative AAM tendency — ERA5 reanalysis
-# Source: ECMWF Copernicus CDS — reanalysis-era5-pressure-levels
+# Global relative AAM tendency — ERA5 reanalysis + GFS f000 gap-fill
+# Source: ECMWF Copernicus CDS (ERA5) + NOAA AWS S3 (GFS f000 analysis)
 # Climatology base: 1980–2010
 # Units: cos²φ-weighted mean sigma/day across all latitudes
 # Generated: 2026-07-01
