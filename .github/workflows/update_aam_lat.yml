@@ -9,7 +9,7 @@ permissions:
 jobs:
   fetch-aam-lat:
     runs-on: ubuntu-latest
-    timeout-minutes: 30     # daily mode only fetches 2–3 months, should finish in <10 min
+    timeout-minutes: 30     # daily mode only fetches 2–3 months + GFS gap-fill, should finish in <15 min
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -17,6 +17,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install system dependencies (eccodes for GRIB2)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libeccodes-dev libeccodes-tools
       - name: Cache pip packages
         uses: actions/cache@v5
         with:
