@@ -1,3 +1,6 @@
 cdsapi
 netCDF4
 numpy
+requests
+cfgrib
+xarray
