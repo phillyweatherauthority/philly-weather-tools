@@ -9,18 +9,16 @@ SOURCE  : NOAA GEFS via AWS S3 open data bucket (no auth required)
           s3://noaa-gefs-pds/gefs.YYYYMMDD/HH/atmos/pgrb2ap5/
           Fallback: NOMADS NCEP if AWS unavailable
 
-MEMBERS : gep01–gep30 (30 perturbed members) + gec00 (control) = 31 total
+MEMBERS : gep01–gep22 (22 members including control)
 LEVELS  : Same 15 pressure levels as ERA5 pipeline (1000–10 hPa)
-HOURS   : 4 six-hourly snapshots per forecast day averaged to daily mean.
-          Day 1 = f006+f012+f018+f024, Day 2 = f030+…+f048, … Day 7 = f150+…+f168
+HOURS   : 3 six-hourly snapshots per forecast day averaged to daily mean.
+          Day 1 = f006+f012+f024, Day 2 = f030+f036+f048, … Day 7 = f150+f156+f168
 
 BIAS CORRECTION:
           After computing σ anomalies, a linear ramp correction is applied
           to eliminate the seam discontinuity between ERA5 and GEFS.
           The offset at day 1 is (last ERA5 anomaly − GEFS day-1 anomaly)
           per latitude, decaying linearly to zero by day 7.
-          This anchors the forecast to the observed state without distorting
-          the forecast evolution signal.
 
 OUTPUT  : data/aam_fcst_mean_latest.txt  — ensemble mean AAM anomaly (σ)
           data/aam_fcst_std_latest.txt   — ensemble std dev (σ)
@@ -46,27 +44,20 @@ OMEGA = 7.292115e-5
 A     = 6.371e6
 G     = 9.80665
 
-# Same 15 pressure levels as ERA5 pipeline (hPa)
 LEVELS_HPA = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50, 20, 10]
 
-# 7 forecast days; each day uses 4 six-hourly snapshots averaged to daily mean.
-# Day N covers hours (N-1)*24+6 through N*24 in 6-hr steps.
 N_FCST_DAYS   = 7
 HOURS_PER_DAY = [6, 12, 24]
 
 def day_hours(day: int) -> list[int]:
-    """Return the 4 forecast hours for day N (1-based)."""
     base = (day - 1) * 24
     return [base + h for h in HOURS_PER_DAY]
 
-# Number of ensemble members (control + 30 perturbed)
 N_MEMBERS = 22
 
-# AWS S3 base — primary source, no auth
 AWS_BASE    = "https://noaa-gefs-pds.s3.amazonaws.com"
 NOMADS_BASE = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gens/prod"
 
-# Paths
 REPO_ROOT            = Path(__file__).resolve().parent.parent
 DATA_DIR             = REPO_ROOT / "data"
 CLIMO_NPZ            = DATA_DIR / "aam_climo.npz"
@@ -78,7 +69,7 @@ FCST_TEND_MEAN_TXT   = DATA_DIR / "aam_fcst_tend_mean_latest.txt"
 FCST_TEND_STD_TXT    = DATA_DIR / "aam_fcst_tend_std_latest.txt"
 FCST_GLOBAL_TEND_TXT = DATA_DIR / "aam_fcst_global_tend_latest.txt"
 
-GRID_RES = 0.5   # GEFS 0.5° grid
+GRID_RES = 0.5
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -100,12 +91,8 @@ def pressure_dp(levels_pa: np.ndarray) -> np.ndarray:
     return dp
 
 
-# ── ERA5 anchor — read last row of aam_lat_latest.txt ────────────────────────
+# ── ERA5 anchor ───────────────────────────────────────────────────────────────
 def load_era5_last_row() -> np.ndarray | None:
-    """
-    Read the most recent ERA5 anomaly row from aam_lat_latest.txt.
-    Returns (nlat,) array or None if file unavailable.
-    """
     if not ERA5_TXT.exists():
         log("WARNING: ERA5 file not found — bias correction disabled.")
         return None
@@ -314,17 +301,9 @@ def interp_to_climo_grid(lats_gefs: np.ndarray, aam: np.ndarray,
 # ── bias correction ───────────────────────────────────────────────────────────
 def compute_bias_ramp(era5_last: np.ndarray, gefs_day1: np.ndarray,
                       n_days: int) -> np.ndarray:
-    """
-    Compute a per-latitude linear ramp correction.
-
-    At day 1: correction = era5_last - gefs_day1  (closes the seam)
-    At day 7: correction = 0                       (forecast free to evolve)
-
-    Returns shape (n_days, nlat).
-    """
-    offset = era5_last - gefs_day1          # (nlat,) — seam gap at day 1
-    ramp   = np.linspace(1.0, 0.0, n_days)  # 1.0 → 0.0 over forecast period
-    return ramp[:, np.newaxis] * offset[np.newaxis, :]  # (n_days, nlat)
+    offset = era5_last - gefs_day1
+    ramp   = np.linspace(1.0, 0.0, n_days)
+    return ramp[:, np.newaxis] * offset[np.newaxis, :]
 
 
 # ── output ────────────────────────────────────────────────────────────────────
@@ -353,9 +332,9 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
     header = [
         "# GFS Ensemble (GEFS) relative AAM forecast anomaly",
         "# Source: NOAA GEFS via AWS S3 open data",
-        "# Averaging: 4 six-hourly snapshots per day (f006/f012/f018/f024 pattern)",
+        "# Averaging: 3 six-hourly snapshots per day (f006/f012/f024 pattern)",
         f"# Bias correction: {bc_note}",
-        "# Units: standardised sigma departures from ERA5 1980–2010 climatology",
+        "# Units: standardised sigma departures from ERA5 1980-2010 climatology",
         f"# Generated: {date.today().isoformat()}",
         "# Lats: " + " ".join(f"{lat:.2f}" for lat in lats),
     ]
@@ -369,25 +348,23 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
             vals = " ".join(f"{v:8.4f}" for v in row)
             lines.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
         txt_path.write_text("\n".join(lines) + "\n")
-        log(f"Wrote {len(fcst_dates)} rows → {txt_path}")
+        log(f"Wrote {len(fcst_dates)} rows to {txt_path}")
 
-    # Global AAM forecast
     weights     = cos2_weights(lats)
     global_mean = global_integral(mean_anom, weights)
     global_std  = global_integral(std_anom,  weights)
 
     lines_g = [
         "# GEFS global relative AAM forecast",
-        "# Units: cos²φ-weighted mean sigma / std sigma",
+        "# Units: cos2phi-weighted mean sigma / std sigma",
         f"# Generated: {date.today().isoformat()}",
         "# Cols: date  mean_sigma  std_sigma",
     ]
     for d, m, s in zip(fcst_dates, global_mean, global_std):
         lines_g.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {m:10.6f}  {s:10.6f}")
     FCST_GLOBAL_TXT.write_text("\n".join(lines_g) + "\n")
-    log(f"Wrote global AAM forecast → {FCST_GLOBAL_TXT}")
+    log(f"Wrote global AAM forecast to {FCST_GLOBAL_TXT}")
 
-    # Tendency forecast
     if len(fcst_dates) > 1:
         tend_mean  = fcst_tendency(mean_anom)
         tend_std   = fcst_tendency(std_anom)
@@ -408,7 +385,7 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
                 vals = " ".join(f"{v:8.4f}" for v in row)
                 lines_t.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {vals}")
             txt_path.write_text("\n".join(lines_t) + "\n")
-            log(f"Wrote tendency forecast → {txt_path}")
+            log(f"Wrote tendency forecast to {txt_path}")
 
         gtend_mean = global_integral(tend_mean, weights)
         gtend_std  = global_integral(tend_std,  weights)
@@ -421,7 +398,7 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
         for d, m, s in zip(tend_dates, gtend_mean, gtend_std):
             lines_gt.append(f"{d.year:04d}.{d.month:02d}.{d.day:02d}  {m:10.6f}  {s:10.6f}")
         FCST_GLOBAL_TEND_TXT.write_text("\n".join(lines_gt) + "\n")
-        log(f"Wrote global tendency forecast → {FCST_GLOBAL_TEND_TXT}")
+        log(f"Wrote global tendency forecast to {FCST_GLOBAL_TEND_TXT}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -429,15 +406,13 @@ def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     climo_mean, climo_std, climo_lats = load_climatology()
-
-    # Load ERA5 last row now — used for bias correction after anomalies computed
     era5_last = load_era5_last_row()
 
     date_str, cycle = latest_gefs_cycle()
     cycle_dt = datetime.strptime(f"{date_str}{cycle}", "%Y%m%d%H")
 
-    log(f"Fetching GEFS {date_str} {cycle}Z — {N_MEMBERS} members × {N_FCST_DAYS} days "
-        f"× {len(HOURS_PER_DAY)} snapshots = {N_MEMBERS * N_FCST_DAYS * len(HOURS_PER_DAY)} fetches")
+    log(f"Fetching GEFS {date_str} {cycle}Z — {N_MEMBERS} members x {N_FCST_DAYS} days "
+        f"x {len(HOURS_PER_DAY)} snapshots = {N_MEMBERS * N_FCST_DAYS * len(HOURS_PER_DAY)} fetches")
 
     lats_ref = None
 
@@ -447,9 +422,9 @@ def main() -> None:
 
     for day_idx in range(N_FCST_DAYS):
         hours = day_hours(day_idx + 1)
-        log(f"\nForecast day {day_idx + 1} — hours {hours} …")
+        log(f"\nForecast day {day_idx + 1} — hours {hours} ...")
         for fxx in hours:
-            log(f"  f{fxx:03d} …")
+            log(f"  f{fxx:03d} ...")
             for mem in range(N_MEMBERS):
                 result = fetch_member_fxx(date_str, cycle, mem, fxx)
                 if result is None:
@@ -461,7 +436,7 @@ def main() -> None:
                 day_member_snaps[day_idx][mem].append(aam_interp)
 
         snap_counts = [len(day_member_snaps[day_idx][m]) for m in range(N_MEMBERS)]
-        log(f"  Day {day_idx + 1}: members with ≥1 snapshot: "
+        log(f"  Day {day_idx + 1}: members with >=1 snapshot: "
             f"{sum(1 for c in snap_counts if c > 0)}/{N_MEMBERS}, "
             f"avg snapshots/member: {np.mean(snap_counts):.1f}")
 
@@ -469,17 +444,15 @@ def main() -> None:
         print("ERROR: no forecast data retrieved.", file=sys.stderr)
         sys.exit(1)
 
-    lats_out = climo_lats
-
-    # Compute daily mean per member, then ensemble stats, then σ anomaly
+    lats_out   = climo_lats
     fcst_dates = []
     mean_anom  = []
     std_anom   = []
 
     for day_idx in range(N_FCST_DAYS):
-        fxx_mid   = day_idx * 24 + 24
-        fcst_dt   = cycle_dt + timedelta(hours=fxx_mid)
-        fcst_date = fcst_dt.date()
+        # Day 1 snapshots (f006-f024) represent the cycle date itself.
+        # cycle_dt + 0 days = day 1 = today, +1 = day 2, etc.
+        fcst_date = (cycle_dt + timedelta(days=day_idx)).date()
         doy       = doy365(fcst_date) - 1
 
         member_daily = []
@@ -506,24 +479,23 @@ def main() -> None:
         fcst_dates.append(fcst_date)
         mean_anom.append(mean_sig)
         std_anom.append(std_sig)
-        log(f"  Day {day_idx + 1} → {fcst_date} (DOY {doy+1}) | "
+        log(f"  Day {day_idx + 1} -> {fcst_date} (DOY {doy+1}) | "
             f"n_members={len(member_daily)} | "
-            f"mean σ range: {mean_sig.min():.2f} to {mean_sig.max():.2f}")
+            f"mean sigma range: {mean_sig.min():.2f} to {mean_sig.max():.2f}")
 
-    mean_anom = np.array(mean_anom)   # (n_days, nlat)
+    mean_anom = np.array(mean_anom)
     std_anom  = np.array(std_anom)
 
-    # ── bias correction ───────────────────────────────────────────────────────
     bias_corrected = False
     if era5_last is not None and len(mean_anom) > 0:
         if len(era5_last) == mean_anom.shape[1]:
-            log("\nApplying ERA5-anchor bias correction …")
+            log("\nApplying ERA5-anchor bias correction ...")
             ramp = compute_bias_ramp(era5_last, mean_anom[0], len(fcst_dates))
-            log(f"  Seam offset — min: {(era5_last - mean_anom[0]).min():.3f}σ  "
-                f"max: {(era5_last - mean_anom[0]).max():.3f}σ  "
-                f"global mean: {(era5_last - mean_anom[0]).mean():.3f}σ")
-            mean_anom     = mean_anom + ramp
-            mean_anom     = np.clip(mean_anom, -4.0, 4.0)
+            log(f"  Seam offset — min: {(era5_last - mean_anom[0]).min():.3f}sigma  "
+                f"max: {(era5_last - mean_anom[0]).max():.3f}sigma  "
+                f"global mean: {(era5_last - mean_anom[0]).mean():.3f}sigma")
+            mean_anom      = mean_anom + ramp
+            mean_anom      = np.clip(mean_anom, -4.0, 4.0)
             bias_corrected = True
             log("  Bias correction applied.")
         else:
