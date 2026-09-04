@@ -2,8 +2,7 @@
 # Source: ECMWF Copernicus CDS (ERA5) + NOAA AWS S3 (GFS f000 analysis)
 # Climatology base: 1980–2010
 # Units: cos²φ-weighted mean sigma/day across all latitudes
-# Generated: 2026-09-03
-2026.07.06   -0.005182
+# Generated: 2026-09-04
 2026.07.07    0.003459
 2026.07.08    0.043549
 2026.07.09   -0.019742
@@ -62,3 +61,4 @@
 2026.08.31   -0.041741
 2026.09.01    0.000413
 2026.09.02    0.069177
+2026.09.03    0.010762
