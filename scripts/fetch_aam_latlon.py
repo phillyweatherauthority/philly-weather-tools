@@ -35,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import cdsapi
-from netCDF4 import Dataset  # noqa: N813
+from netCDF4 import Dataset, num2date  # noqa: N813
 
 # ── constants ────────────────────────────────────────────────────────────────
 OMEGA = 7.292115e-5   # Earth rotation rate (rad/s)
@@ -118,7 +118,6 @@ def iter_months(start_ym: tuple, end_ym: tuple):
 # ── ERA5 fetch: single month ──────────────────────────────────────────────────
 def fetch_month(year: int, month: int) -> tuple[np.ndarray, list[date], np.ndarray]:
     ndays     = calendar.monthrange(year, month)[1]
-    days_list = [date(year, month, d) for d in range(1, ndays + 1)]
 
     client  = cdsapi.Client(quiet=True)
     request = {
@@ -149,10 +148,14 @@ def fetch_month(year: int, month: int) -> tuple[np.ndarray, list[date], np.ndarr
                 raise
 
     try:
-        aam, lats_deg = _nc_to_aam(tmp_path, ndays)
+        aam, lats_deg, days_list = _nc_to_aam(tmp_path)
     finally:
         os.unlink(tmp_path)
 
+    if not days_list:
+        raise RuntimeError(f"ERA5 returned no complete days for {year}-{month:02d}")
+    log(f"  ERA5 {year}-{month:02d}: {len(days_list)} complete days "
+        f"({days_list[0]} → {days_list[-1]})")
     return lats_deg, days_list, aam
 
 
@@ -161,7 +164,6 @@ def fetch_year(year: int) -> tuple[np.ndarray, list[date], np.ndarray]:
     import calendar as cal_mod
     is_leap   = cal_mod.isleap(year)
     ndays     = 366 if is_leap else 365
-    days_list = [date(year, 1, 1) + timedelta(days=i) for i in range(ndays)]
 
     client  = cdsapi.Client(quiet=True)
     request = {
@@ -193,49 +195,91 @@ def fetch_year(year: int) -> tuple[np.ndarray, list[date], np.ndarray]:
                 raise
 
     try:
-        aam, lats_deg = _nc_to_aam(tmp_path, ndays)
+        aam, lats_deg, days_list = _nc_to_aam(tmp_path)
     finally:
         os.unlink(tmp_path)
 
+    if not days_list:
+        raise RuntimeError(f"ERA5 returned no complete days for {year}")
+    log(f"  ERA5 {year}: {len(days_list)} complete days "
+        f"({days_list[0]} → {days_list[-1]})")
     return lats_deg, days_list, aam
 
 
 # ── shared NetCDF → AAM processor ────────────────────────────────────────────
-def _nc_to_aam(nc_path: str, expected_days: int) -> tuple[np.ndarray, np.ndarray]:
+STEPS_PER_DAY = 4   # 00, 06, 12, 18 UTC
+
+
+def _nc_times(ds) -> list[datetime]:
+    """Return the valid time of every step in the file as datetimes."""
+    for key in ("valid_time", "time"):
+        if key in ds.variables:
+            var = ds.variables[key]
+            return list(num2date(
+                var[:], var.units,
+                calendar=getattr(var, "calendar", "standard"),
+                only_use_cftime_datetimes=False,
+            ))
+    raise RuntimeError("No time coordinate (valid_time/time) in ERA5 file.")
+
+
+def _nc_to_aam(nc_path: str) -> tuple[np.ndarray, np.ndarray, list[date]]:
+    """
+    Compute daily-mean AAM per latitude from an ERA5 NetCDF file.
+
+    Steps are grouped by their ACTUAL valid date read from the file. CDS
+    returns only the timesteps that exist, so a request for the current
+    (incomplete) month comes back short; assuming the file covers the whole
+    month assigns data to the wrong dates. Only days with all four 6-hourly
+    steps are returned.
+
+    Returns (aam shape (ndays, nlat), lats_deg, days).
+    """
     ds    = Dataset(nc_path)
-    u_var = ds.variables["u"]
+    try:
+        u_var = ds.variables["u"]
 
-    lats_deg = np.array(ds.variables["latitude"][:])
-    lev_key  = "pressure_level" if "pressure_level" in ds.variables else "level"
-    levs_hpa = np.array(ds.variables[lev_key][:])
+        lats_deg = np.array(ds.variables["latitude"][:])
+        lev_key  = "pressure_level" if "pressure_level" in ds.variables else "level"
+        levs_hpa = np.array(ds.variables[lev_key][:])
 
-    lev_order = np.argsort(levs_hpa)[::-1]
-    levs_pa   = levs_hpa[lev_order] * 100.0
-    dp        = pressure_dp(levs_pa)
+        lev_order = np.argsort(levs_hpa)[::-1]
+        levs_pa   = levs_hpa[lev_order] * 100.0
+        dp        = pressure_dp(levs_pa)
 
-    lats_rad  = np.deg2rad(lats_deg)
-    prefactor = (2.0 * np.pi / G) * np.cos(lats_rad)**2 * A**3 * OMEGA
+        lats_rad  = np.deg2rad(lats_deg)
+        prefactor = (2.0 * np.pi / G) * np.cos(lats_rad)**2 * A**3 * OMEGA
 
-    ntimes        = u_var.shape[0]
-    nlat          = len(lats_deg)
-    steps_per_day = ntimes // expected_days
-    aam           = np.zeros((expected_days, nlat), dtype=np.float64)
+        times = _nc_times(ds)
+        if len(times) != u_var.shape[0]:
+            raise RuntimeError(
+                f"Time coordinate length {len(times)} != u steps {u_var.shape[0]}")
 
-    for t in range(ntimes):
-        day_idx = t // steps_per_day
-        if day_idx >= expected_days:
-            break
-        u_raw = np.array(u_var[t, :, :, :])
-        if hasattr(u_raw, "filled"):
-            u_raw = u_raw.filled(np.nan)
-        u_raw    = u_raw[lev_order, :, :]
-        u_zonal  = np.nanmean(u_raw, axis=2)
-        vert_int = np.nansum(u_zonal * dp[:, np.newaxis], axis=0)
-        aam[day_idx] += prefactor * vert_int
+        sums:   dict[date, np.ndarray] = {}
+        counts: dict[date, int]        = {}
+        for t, when in enumerate(times):
+            u_raw = np.array(u_var[t, :, :, :])
+            if hasattr(u_raw, "filled"):
+                u_raw = u_raw.filled(np.nan)
+            u_raw    = u_raw[lev_order, :, :]
+            if np.all(np.isnan(u_raw)):
+                continue                       # step present but empty
+            u_zonal  = np.nanmean(u_raw, axis=2)
+            vert_int = np.nansum(u_zonal * dp[:, np.newaxis], axis=0)
+            d = date(when.year, when.month, when.day)
+            sums[d]   = sums.get(d, 0.0) + prefactor * vert_int
+            counts[d] = counts.get(d, 0) + 1
+    finally:
+        ds.close()
 
-    aam /= steps_per_day
-    ds.close()
-    return aam, lats_deg
+    days    = sorted(d for d, n in counts.items() if n == STEPS_PER_DAY)
+    partial = sorted(d for d, n in counts.items() if n != STEPS_PER_DAY)
+    if partial:
+        log(f"  Dropping {len(partial)} incomplete day(s): "
+            f"{partial[0]} … {partial[-1]}")
+    nlat = len(lats_deg)
+    aam  = np.array([sums[d] / STEPS_PER_DAY for d in days]).reshape(len(days), nlat)
+    return aam, lats_deg, days
 
 
 # ── GFS f000 gap-fill ─────────────────────────────────────────────────────────
@@ -365,14 +409,14 @@ def fetch_gfs_gap(last_era5_date: date, climo_lats: np.ndarray,
                   climo_mean: np.ndarray, climo_std: np.ndarray
                   ) -> tuple[list[date], np.ndarray]:
     """
-    Fetch GFS f000 for each day between last_era5_date+1 and yesterday
-    (today's GFS analysis may not yet be available at workflow run time).
+    Fetch GFS f000 for each day from last_era5_date+1 through today (UTC).
+    The 00Z analysis is on AWS by about 04 UTC; if today's is not there yet
+    it is skipped and the series simply ends yesterday.
     Returns (gap_dates, gap_anom shape (ngap, nlat)).
     """
-    today     = date.today()
-    # Stop at yesterday — today's 00Z GFS f000 may not be available at 12:00 UTC
+    today     = datetime.now(timezone.utc).date()
     gap_start = last_era5_date + timedelta(days=1)
-    gap_end   = today - timedelta(days=1)
+    gap_end   = today
 
     if gap_start > gap_end:
         log("No gap to fill — ERA5 is current enough.")
@@ -560,6 +604,16 @@ def fetch_recent(window_days: int) -> tuple[np.ndarray, list[date], np.ndarray]:
     return lats, all_dates, np.array(all_aam)
 
 
+def zero_poles(lats: np.ndarray, anom: np.ndarray) -> np.ndarray:
+    """
+    cos²φ is zero at ±90°, so AAM and its climatological spread vanish there
+    and the standardised anomaly is 0/0 noise. Set it to zero.
+    """
+    out = anom.copy()
+    out[:, np.abs(lats) > 89.99] = 0.0
+    return out
+
+
 # ── output ────────────────────────────────────────────────────────────────────
 def write_output(dates: list[date], lats: np.ndarray, anom: np.ndarray) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -681,6 +735,8 @@ def main() -> None:
     else:
         all_dates = dates
         all_anom  = anom
+
+    all_anom = zero_poles(lats, all_anom)
 
     write_output(all_dates, lats, all_anom)
 

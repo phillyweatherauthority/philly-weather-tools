@@ -1,53 +1,81 @@
-name: Update Relative AAM (Latitude) Data
+name: Update AAM Data (observed + GEFS forecast)
+
 on:
   schedule:
-    # 12:00 UTC daily — ERA5 has ~5-day lag so exact time matters less
-    - cron: '0 12 * * *'
+    # 12:23 UTC daily. Off the top of the hour, where GitHub's scheduler is
+    # least delayed. By now the 00Z GFS analysis and 00Z GEFS run are complete.
+    - cron: '23 12 * * *'
   workflow_dispatch:
+
 permissions:
   contents: write
+
+# Never let two AAM runs write the data files at the same time.
+concurrency:
+  group: aam-data
+  cancel-in-progress: false
+
 jobs:
-  fetch-aam-lat:
+  update-aam:
     runs-on: ubuntu-latest
-    timeout-minutes: 30     # daily mode only fetches 2–3 months + GFS gap-fill, should finish in <15 min
+    timeout-minutes: 90
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install system dependencies (eccodes for GRIB2)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libeccodes-dev libeccodes-tools
+
       - name: Cache pip packages
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-aam-era5-${{ hashFiles('**/requirements_aam_lat.txt') }}
+          key: ${{ runner.os }}-pip-aam-${{ hashFiles('**/requirements_aam_lat.txt', '**/requirements_aam_fcst.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-aam-era5-
-      - name: Install dependencies
+            ${{ runner.os }}-pip-aam-
+
+      - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements_aam_lat.txt
-      - name: Fetch ERA5 and compute relative AAM anomalies
+          pip install -r requirements_aam_lat.txt -r requirements_aam_fcst.txt
+
+      # Observed first: the forecast is anchored to the newest observed row.
+      - name: Fetch ERA5 + GFS analysis and compute observed AAM anomalies
         env:
           CDS_API_KEY: ${{ secrets.CDS_API_KEY }}
         run: python scripts/fetch_aam_latlon.py --mode daily --window 60
+
+      # If the forecast step fails, the observed data is still committed below.
+      - name: Fetch GEFS and compute AAM forecast anomalies
+        continue-on-error: true
+        run: python scripts/fetch_gfs_aam.py
+
       - name: Commit and push updated data
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/aam_lat_latest.txt
-          git add data/aam_global_latest.txt 2>/dev/null || true
-          git add data/aam_tendency_latest.txt 2>/dev/null || true
-          git add data/aam_global_tendency_latest.txt 2>/dev/null || true
+          git add data/aam_global_latest.txt           2>/dev/null || true
+          git add data/aam_tendency_latest.txt         2>/dev/null || true
+          git add data/aam_global_tendency_latest.txt  2>/dev/null || true
+          git add data/aam_fcst_mean_latest.txt        2>/dev/null || true
+          git add data/aam_fcst_std_latest.txt         2>/dev/null || true
+          git add data/aam_fcst_global_latest.txt      2>/dev/null || true
+          git add data/aam_fcst_tend_mean_latest.txt   2>/dev/null || true
+          git add data/aam_fcst_tend_std_latest.txt    2>/dev/null || true
+          git add data/aam_fcst_global_tend_latest.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "chore: update AAM lat data (ERA5) [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git commit -m "chore: update AAM data (observed + GEFS) [$(date -u '+%Y-%m-%d %H:%M UTC')]"
             git pull --rebase origin main
             git push
           fi

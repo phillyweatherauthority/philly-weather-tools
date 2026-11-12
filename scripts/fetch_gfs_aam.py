@@ -9,7 +9,7 @@ SOURCE  : NOAA GEFS via AWS S3 open data bucket (no auth required)
           s3://noaa-gefs-pds/gefs.YYYYMMDD/HH/atmos/pgrb2ap5/
           Fallback: NOMADS NCEP if AWS unavailable
 
-MEMBERS : gep01–gep22 (22 members including control)
+MEMBERS : gec00 + gep01–gep21 (22 members including control)
 LEVELS  : Same 15 pressure levels as ERA5 pipeline (1000–10 hPa)
 HOURS   : 3 six-hourly snapshots per forecast day averaged to daily mean.
           Day 1 = f006+f012+f024, Day 2 = f030+f036+f048, … Day 7 = f150+f156+f168
@@ -17,8 +17,9 @@ HOURS   : 3 six-hourly snapshots per forecast day averaged to daily mean.
 BIAS CORRECTION:
           After computing σ anomalies, a linear ramp correction is applied
           to eliminate the seam discontinuity between ERA5 and GEFS.
-          The offset at day 1 is (last ERA5 anomaly − GEFS day-1 anomaly)
-          per latitude, decaying linearly to zero by day 7.
+          The offset at day 1 is (observed anomaly for the same date, or the
+          day before − GEFS day-1 anomaly) per latitude, decaying linearly to
+          zero by day 7. Skipped if no observed row is that recent.
 
 OUTPUT  : data/aam_fcst_mean_latest.txt  — ensemble mean AAM anomaly (σ)
           data/aam_fcst_std_latest.txt   — ensemble std dev (σ)
@@ -91,13 +92,14 @@ def pressure_dp(levels_pa: np.ndarray) -> np.ndarray:
     return dp
 
 
-# ── ERA5 anchor ───────────────────────────────────────────────────────────────
-def load_era5_last_row() -> np.ndarray | None:
+# ── observed anchor ───────────────────────────────────────────────────────────
+def load_obs_rows() -> dict[date, np.ndarray]:
+    """Read data/aam_lat_latest.txt into {date: anomaly row}."""
+    rows: dict[date, np.ndarray] = {}
     if not ERA5_TXT.exists():
-        log("WARNING: ERA5 file not found — bias correction disabled.")
-        return None
+        log("WARNING: observed file not found — bias correction disabled.")
+        return rows
     try:
-        last_row = None
         with open(ERA5_TXT) as f:
             for line in f:
                 s = line.strip()
@@ -106,30 +108,45 @@ def load_era5_last_row() -> np.ndarray | None:
                 parts = s.split()
                 if len(parts) < 2:
                     continue
-                last_row = np.array([float(v) for v in parts[1:]])
-        if last_row is None:
-            log("WARNING: ERA5 file empty — bias correction disabled.")
-        return last_row
+                y, m, d = (int(x) for x in parts[0].split("."))
+                rows[date(y, m, d)] = np.array([float(v) for v in parts[1:]])
     except Exception as exc:
-        log(f"WARNING: could not read ERA5 file ({exc}) — bias correction disabled.")
-        return None
+        log(f"WARNING: could not read observed file ({exc}) — bias correction disabled.")
+        return {}
+    return rows
+
+
+def pick_anchor(obs: dict[date, np.ndarray], day1: date
+                ) -> tuple[np.ndarray | None, date | None]:
+    """
+    Choose the observed row to anchor forecast day 1 to. It must be for the
+    same date as day 1, or the day before. An older row is not used: pinning
+    day 1 to an observation from two or more days earlier erases real change
+    across the seam.
+    """
+    for cand in (day1, day1 - timedelta(days=1)):
+        if cand in obs:
+            return obs[cand], cand
+    if obs:
+        log(f"WARNING: newest observed row is {max(obs)}, forecast day 1 is {day1} "
+            f"— too far apart, bias correction skipped.")
+    return None, None
 
 
 # ── find latest GEFS cycle ────────────────────────────────────────────────────
 def latest_gefs_cycle() -> tuple[str, str]:
-    now = datetime.now(timezone.utc)
-    candidates = []
+    """
+    Latest 00Z GEFS cycle whose final needed forecast hour is published.
+    Only 00Z is used so that forecast "days" line up with UTC calendar days,
+    the same way the observed series is built.
+    """
+    now      = datetime.now(timezone.utc)
+    last_fxx = max(day_hours(N_FCST_DAYS))
+    cycle    = "00"
     for delta in range(3):
-        d = now - timedelta(days=delta)
-        for hh in [18, 12, 6, 0]:
-            run_time = d.replace(hour=hh, minute=0, second=0, microsecond=0)
-            lag = (now - run_time).total_seconds() / 3600
-            if lag >= 6:
-                candidates.append((d.strftime("%Y%m%d"), f"{hh:02d}"))
-
-    for date_str, cycle in candidates:
+        date_str = (now - timedelta(days=delta)).strftime("%Y%m%d")
         url = (f"{AWS_BASE}/gefs.{date_str}/{cycle}/atmos/pgrb2ap5/"
-               f"gec00.t{cycle}z.pgrb2a.0p50.f006.idx")
+               f"gec00.t{cycle}z.pgrb2a.0p50.f{last_fxx:03d}.idx")
         try:
             r = requests.head(url, timeout=8)
             if r.status_code == 200:
@@ -138,7 +155,7 @@ def latest_gefs_cycle() -> tuple[str, str]:
         except Exception:
             continue
 
-    raise RuntimeError("Could not find a recent GEFS cycle on AWS.")
+    raise RuntimeError("Could not find a complete recent 00Z GEFS cycle on AWS.")
 
 
 # ── GRIB2 byte-range fetch ────────────────────────────────────────────────────
@@ -328,7 +345,7 @@ def write_fcst_files(fcst_dates: list[date], lats: np.ndarray,
                      bias_corrected: bool) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     bc_note = "linear ramp bias correction applied (day1=ERA5-anchored, day7=free)" \
-              if bias_corrected else "no bias correction (ERA5 anchor unavailable)"
+              if bias_corrected else "no bias correction (no observed row for forecast day 1 or the day before)"
     header = [
         "# GFS Ensemble (GEFS) relative AAM forecast anomaly",
         "# Source: NOAA GEFS via AWS S3 open data",
@@ -406,7 +423,7 @@ def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     climo_mean, climo_std, climo_lats = load_climatology()
-    era5_last = load_era5_last_row()
+    obs_rows = load_obs_rows()
 
     date_str, cycle = latest_gefs_cycle()
     cycle_dt = datetime.strptime(f"{date_str}{cycle}", "%Y%m%d%H")
@@ -486,20 +503,28 @@ def main() -> None:
     mean_anom = np.array(mean_anom)
     std_anom  = np.array(std_anom)
 
+    # cos²(90°) = 0, so the anomaly at the poles is 0/0 noise
+    pole = np.abs(lats_out) > 89.99
+    mean_anom[:, pole] = 0.0
+    std_anom[:, pole]  = 0.0
+
     bias_corrected = False
-    if era5_last is not None and len(mean_anom) > 0:
-        if len(era5_last) == mean_anom.shape[1]:
-            log("\nApplying ERA5-anchor bias correction ...")
-            ramp = compute_bias_ramp(era5_last, mean_anom[0], len(fcst_dates))
-            log(f"  Seam offset — min: {(era5_last - mean_anom[0]).min():.3f}sigma  "
-                f"max: {(era5_last - mean_anom[0]).max():.3f}sigma  "
-                f"global mean: {(era5_last - mean_anom[0]).mean():.3f}sigma")
+    if len(mean_anom) > 0:
+        anchor, anchor_date = pick_anchor(obs_rows, fcst_dates[0])
+        if anchor is not None and len(anchor) == mean_anom.shape[1]:
+            log(f"\nApplying bias correction, anchored to observed {anchor_date} ...")
+            offset = anchor - mean_anom[0]
+            offset[pole] = 0.0
+            ramp = compute_bias_ramp(anchor, anchor - offset, len(fcst_dates))
+            log(f"  Seam offset — min: {offset.min():.3f}sigma  "
+                f"max: {offset.max():.3f}sigma  "
+                f"mean: {offset.mean():.3f}sigma")
             mean_anom      = mean_anom + ramp
             mean_anom      = np.clip(mean_anom, -4.0, 4.0)
             bias_corrected = True
             log("  Bias correction applied.")
-        else:
-            log(f"WARNING: ERA5 lat count ({len(era5_last)}) != GEFS lat count "
+        elif anchor is not None:
+            log(f"WARNING: observed lat count ({len(anchor)}) != GEFS lat count "
                 f"({mean_anom.shape[1]}) — bias correction skipped.")
 
     write_fcst_files(fcst_dates, lats_out, mean_anom, std_anom, bias_corrected)
