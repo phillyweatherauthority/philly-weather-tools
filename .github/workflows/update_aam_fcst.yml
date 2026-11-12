@@ -1,14 +1,17 @@
-name: Update AAM Forecast (GEFS)
+name: Update AAM Forecast (GEFS, manual)
 
 on:
-  schedule:
-    # Run once daily at 06:00 UTC — 6hr after 00Z GEFS init,
-    # enough time for all forecast hours including f168 to be available
-    - cron: '0 6 * * *'
+  # Manual only. The daily run now happens inside "Update AAM Data"
+  # (update_aam_lat.yml), straight after the observed data is refreshed,
+  # so the forecast is always anchored to a current observed row.
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: aam-data
+  cancel-in-progress: false
 
 jobs:
   fetch-gefs-aam:
@@ -59,5 +62,6 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "chore: update GEFS AAM forecast [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+            git pull --rebase origin main
             git push
           fi
